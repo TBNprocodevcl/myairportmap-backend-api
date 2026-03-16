@@ -1,0 +1,11 @@
+flask
+boto3
+botocore
+requests
+pandas
+folium
+stripe
+Pillow
+python-jose
+python-dotenv
+jinja2
