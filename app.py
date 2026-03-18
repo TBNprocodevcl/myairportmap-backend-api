@@ -17114,7 +17114,6 @@ def debug_bravo_card():
     png = generate_bravo_badge_png("myairportmap-demo")
     return Response(png, mimetype="image/png")
 
-
 if __name__ == "__main__":
     print(f"--- {APP_TITLE} ---")
     print(f"BASE_DIR: {BASE_DIR}")

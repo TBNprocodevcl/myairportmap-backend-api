@@ -9,3 +9,4 @@ Pillow
 python-jose
 python-dotenv
 jinja2
+flasgger

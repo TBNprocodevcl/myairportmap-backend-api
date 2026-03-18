@@ -242,3 +242,33 @@ def api_profile_achievements_certs():
                 pass
 
     return {"ok": True, "certs": certs, "added": added}
+
+@profile_api.route("/api/profile/logout", methods=["POST"])
+@login_required
+def api_logout():
+    resp = jsonify({
+        "ok": True,
+        "message": "Logged out"
+    })
+
+    # ✅ Xoá cookie auth chính
+    resp.delete_cookie("mam_auth", path="/")
+
+    # (optional) Xoá thêm nếu từng dùng
+    resp.delete_cookie("session", path="/")
+    resp.delete_cookie("mam_web", path="/")
+
+    # (optional) nếu có domain cookie
+    resp.delete_cookie("mam_auth", path="/", domain=".myairportmap.com")
+
+    # ✅ Brake cookie (tránh auto login lại)
+    resp.set_cookie(
+        "mam_signed_out",
+        "1",
+        max_age=300,   # 5 phút
+        secure=True,
+        samesite="Lax",
+        path="/"
+    )
+
+    return resp

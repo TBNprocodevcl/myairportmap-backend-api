@@ -6,9 +6,6 @@ from app import _load_visits_csv, current_user_handle, login_required, resolve_v
 logbook_api = Blueprint("logbook_api", __name__)
 
 @logbook_api.route("/api/logbook", methods=["GET"])
-
-@login_required
-@logbook_api.route("/api/logbook", methods=["GET"])
 @login_required
 def api_logbook():
     handle = current_user_handle()
