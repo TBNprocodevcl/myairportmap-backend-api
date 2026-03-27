@@ -1,2 +1,2 @@
-alembic revision --autogenerate -m "add column"
+alembic revision --autogenerate -m "update something"
 alembic upgrade head

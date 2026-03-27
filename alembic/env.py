@@ -1,8 +1,8 @@
 from logging.config import fileConfig
+from app.core.config import settings
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-
 from alembic import context
 import sys
 import os
@@ -12,6 +12,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # access to the values within the .ini file in use.
 config = context.config
 
+database_url = settings.DATABASE_URL
+print(database_url)
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
