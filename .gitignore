@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env/
+.venv/
+
+# Environment variables
+.env
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest / cache
+.pytest_cache/
+.coverage
+
+# Migrations (optional nếu muốn ignore)
+# alembic/versions/*.py
+
+# Node (nếu có frontend)
+node_modules/
+
+# Build
+dist/
+build/

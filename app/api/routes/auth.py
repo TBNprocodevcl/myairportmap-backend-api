@@ -1,0 +1,158 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from jose import jwt, JWTError
+
+from app.db.session import SessionLocal
+from app.models.user import User
+from app.schemas.google import GoogleLoginRequest
+from app.schemas.user import RegisterRequest, LoginRequest, TokenResponse, UserResponse
+from app.core.security import hash_password, verify_password, create_access_token
+from app.core.config import settings
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+
+
+security = HTTPBearer()
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = settings.ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+
+# dependency DB
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def normalize_handle(email: str):
+    return email.split("@")[0].lower()
+
+def avatar_url_for_handle(handle: str):
+    return f"https://api.dicebear.com/7.x/initials/svg?seed={handle}"
+
+
+# 🔥 REGISTER
+@router.post("/register", response_model=UserResponse)
+def register(data: RegisterRequest, db: Session = Depends(get_db)):
+    exists = db.query(User).filter(User.email == data.email).first()
+    if exists:
+        raise HTTPException(400, "Email already exists")
+
+    handle = normalize_handle(data.email)
+
+    user = User(
+        email=data.email,
+        password=hash_password(data.password),
+        handle=handle,
+        avatar_url=avatar_url_for_handle(handle),
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return user
+
+
+# 🔐 LOGIN
+@router.post("/login", response_model=TokenResponse)
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+
+    if not user or not verify_password(data.password, user.password):
+        raise HTTPException(401, "Invalid credentials")
+
+    token = create_access_token({"sub": str(user.id)})
+
+    return {"access_token": token}
+
+
+# 🔍 GET CURRENT USER
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+    except JWTError:
+        raise HTTPException(401, "Invalid token")
+
+    user = db.query(User).get(UUID(user_id))
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    return user
+
+
+# 👤 /me
+@router.get("/me", response_model=UserResponse)
+def me(user = Depends(get_current_user)):
+    return user
+
+
+@router.post("/google", response_model=TokenResponse)
+def login_google(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
+    token = payload.token
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Token missing")
+
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            token,
+            google_requests.Request()
+        )
+
+        # 🔥 check audience
+        if idinfo["aud"] not in settings.GOOGLE_CLIENT_IDS:
+            raise HTTPException(status_code=401, detail="Invalid audience")
+
+        # 🔥 check issuer
+        if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise HTTPException(status_code=401, detail="Invalid issuer")
+
+        email = idinfo.get("email")
+        if not email:
+            raise HTTPException(400, "Email not found")
+
+        if not idinfo.get("email_verified"):
+            raise HTTPException(400, "Email not verified")
+
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    # ===== USER =====
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        handle = normalize_handle(email)
+
+        user = User(
+            email=email,
+            password=None,
+            handle=handle,
+            avatar_url=idinfo.get("picture") or avatar_url_for_handle(handle),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    # ===== JWT =====
+    access_token = create_access_token({"sub": str(user.id)})
+
+    return {"access_token": access_token}
