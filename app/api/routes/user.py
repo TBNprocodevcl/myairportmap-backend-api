@@ -1,13 +1,18 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from app.api.routes.auth import get_current_user
 from app.db.session import get_db
+from app.models.airport import Airport
 from app.models.user import User
+from app.models.visit import Visit
 from app.schemas.user import UserResponse
 
-router = APIRouter()
+router = APIRouter(prefix="/users", tags=["users"])
 
-@router.get("/users", response_model=list[UserResponse])
+@router.get("/", response_model=list[UserResponse])
 def get_users(
     skip: int = 0,
     limit: int = 10,
@@ -57,3 +62,4 @@ def get_users(
     users = query.offset(skip).limit(limit).all()
 
     return users
+

@@ -6,46 +6,35 @@ from sqlalchemy import or_
 from app.db.session import get_db
 from app.models.airport import Airport
 
-router = APIRouter()
+router = APIRouter(prefix="/airports", tags=["airports"])
 
-@router.get("/airports")
+@router.get("/")
 def get_airports(
     skip: int = 0,
     limit: int = 50,
-
-    # 🔎 filter
     city: str | None = None,
     state: str | None = None,
     towered: str | None = None,
-
-    # 🔍 search
     q: str | None = None,
-
-    # 🗺 bounding box
     min_lat: float | None = None,
     max_lat: float | None = None,
     min_lng: float | None = None,
     max_lng: float | None = None,
-
     db: Session = Depends(get_db)
 ):
     query = db.query(Airport)
 
-    # ========================
     # FILTER
-    # ========================
     if city:
-        query = query.filter(Airport.city == city)
+        query = query.filter(Airport.city.ilike(f"%{city}%"))
 
     if state:
-        query = query.filter(Airport.state == state)
+        query = query.filter(Airport.state.ilike(f"%{state}%"))
 
     if towered:
-        query = query.filter(Airport.towered_status == towered)
+        query = query.filter(Airport.towered_status.ilike(f"%{towered}%"))
 
-    # ========================
     # SEARCH
-    # ========================
     if q:
         query = query.filter(
             or_(
@@ -55,18 +44,19 @@ def get_airports(
             )
         )
 
-    # ========================
-    # MAP BOUNDING BOX
-    # ========================
-    if min_lat and max_lat and min_lng and max_lng:
+    # BOUNDING BOX
+    if (
+        min_lat is not None and
+        max_lat is not None and
+        min_lng is not None and
+        max_lng is not None
+    ):
         query = query.filter(
             Airport.latitude.between(min_lat, max_lat),
             Airport.longitude.between(min_lng, max_lng),
         )
 
-    # ========================
     # PAGINATION
-    # ========================
-    airports = query.offset(skip).limit(limit).all()
+    limit = min(limit, 200)
 
-    return airports
+    return query.offset(skip).limit(limit).all()

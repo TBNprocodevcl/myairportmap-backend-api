@@ -55,6 +55,8 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
     user = User(
         email=data.email,
         password=hash_password(data.password),
+        first_name=data.first_name,
+        last_name=data.last_name,
         handle=handle,
         avatar_url=avatar_url_for_handle(handle),
     )
