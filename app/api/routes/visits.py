@@ -1,12 +1,21 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import Optional, List
+
 from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models import Visit, Airport
-from typing import Optional
+
+# ✅ IMPORT SCHEMA
+from app.schemas.visit import VisitedAirportResponse
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 
+
+# =========================================================
+# 🧾 RAW VISITS (giữ lại nhưng clean hơn)
+# =========================================================
 @router.get("/")
 def get_visits(
     user_id: str,
@@ -24,25 +33,16 @@ def get_visits(
         .filter(Visit.user_id == user_id)
     )
 
-    # 🔎 filter
     if airport_id:
         query = query.filter(Visit.airport_id == airport_id)
 
     if city:
         query = query.filter(Airport.city.ilike(f"%{city}%"))
 
-    # 🔽 sort
-    if sort_by == "date_visited":
-        sort_column = Visit.date_visited
-    else:
-        sort_column = Visit.id
+    # sort
+    sort_column = Visit.date_visited if sort_by == "date_visited" else Visit.id
+    query = query.order_by(sort_column.desc() if order == "desc" else sort_column.asc())
 
-    if order == "desc":
-        query = query.order_by(sort_column.desc())
-    else:
-        query = query.order_by(sort_column.asc())
-
-    # 📄 pagination
     results = query.offset(skip).limit(limit).all()
 
     return [
@@ -62,6 +62,10 @@ def get_visits(
         for visit, airport in results
     ]
 
+
+# =========================================================
+# 🧾 MY RAW VISITS (AUTH)
+# =========================================================
 @router.get("/me")
 def get_my_visits(
     airport_id: Optional[str] = None,
@@ -71,48 +75,33 @@ def get_my_visits(
     sort_by: str = "date_visited",
     order: str = "desc",
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)  # 👈 AUTH
+    user = Depends(get_current_user)
 ):
     query = (
         db.query(Visit, Airport)
         .join(Airport, Visit.airport_id == Airport.airport_id)
-        .filter(Visit.user_id == user.id)  
+        .filter(Visit.user_id == user.id)
     )
 
-    # ========================
-    # FILTER
-    # ========================
     if airport_id:
         query = query.filter(Visit.airport_id == airport_id)
 
     if city:
         query = query.filter(Airport.city.ilike(f"%{city}%"))
 
-    # ========================
-    # SORT
-    # ========================
+    # safe sort
     if sort_by == "date_visited":
         sort_column = Visit.date_visited
-    elif sort_by == "created_at":
+    elif sort_by == "created_at" and hasattr(Visit, "created_at"):
         sort_column = Visit.created_at
     else:
         sort_column = Visit.id
 
-    if order == "desc":
-        query = query.order_by(sort_column.desc())
-    else:
-        query = query.order_by(sort_column.asc())
+    query = query.order_by(sort_column.desc() if order == "desc" else sort_column.asc())
 
-    # ========================
-    # PAGINATION
-    # ========================
     limit = min(limit, 100)
-
     results = query.offset(skip).limit(limit).all()
 
-    # ========================
-    # RESPONSE
-    # ========================
     return [
         {
             "id": visit.id,
@@ -127,4 +116,56 @@ def get_my_visits(
             "notes": visit.notes,
         }
         for visit, airport in results
+    ]
+
+
+# =========================================================
+# 🗺️ VISITED AIRPORTS (🔥 MAIN API)
+# =========================================================
+@router.get("/me/airports", response_model=List[VisitedAirportResponse])
+def get_my_visited_airports(
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    rows = (
+        db.query(
+            Visit.airport_id.label("id"),
+            Airport.name,
+            Airport.latitude,
+            Airport.longitude,
+            Airport.state,
+            Airport.towered_status,
+            func.count(Visit.id).label("visitCount"),
+            func.max(Visit.date_visited).label("last_visited"),
+            func.max(Visit.notes).label("notes"),
+            func.max(Visit.callsign).label("airCraft"),
+        )
+        .join(Airport, Visit.airport_id == Airport.airport_id)
+        .filter(Visit.user_id == user.id)
+        .group_by(
+            Visit.airport_id,
+            Airport.name,
+            Airport.latitude,
+            Airport.longitude,
+            Airport.state,
+            Airport.towered_status,
+        )
+        .all()
+    )
+
+    # ✅ map → schema
+    return [
+        VisitedAirportResponse(
+            id=r.id,
+            name=r.name,
+            lat=r.latitude,
+            lng=r.longitude,
+            state=r.state,
+            status=r.towered_status,
+            visitCount=r.visitCount,
+            last_visited=r.last_visited,
+            notes=r.notes,
+            airCraft=r.airCraft,
+        )
+        for r in rows
     ]
