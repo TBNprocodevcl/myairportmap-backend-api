@@ -12,115 +12,165 @@ from app.schemas.visit import VisitedAirportResponse
 from helper.response import success_response
 
 router = APIRouter(prefix="/visits", tags=["visits"])
+def serialize_airport(r):
+    return {
+        "id": r.id,
+        "name": r.name,
+        "city": r.city,
+        "state": r.state,
 
+        "lat": r.latitude,
+        "lng": r.longitude,
+        "status": r.towered_status,
+
+        "visitCount": r.visitCount or 0,
+        "isVisited": (r.visitCount or 0) > 0,
+
+        "first_visited": r.first_visited,
+        "last_visited": r.last_visited,
+    }
+def parse_bbox(bbox: str):
+    try:
+        min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
+        return min_lng, min_lat, max_lng, max_lat
+    except:
+        return None
+    
+def build_airport_query(db: Session, user_id: str):
+    return (
+        db.query(
+            Airport.airport_id.label("id"),
+            Airport.name,
+            Airport.city,
+            Airport.state,
+            Airport.latitude,
+            Airport.longitude,
+            Airport.towered_status,
+
+            func.count(Visit.id).label("visitCount"),
+            func.min(Visit.date_visited).label("first_visited"),
+            func.max(Visit.date_visited).label("last_visited"),
+        )
+        .outerjoin(
+            Visit,
+            (Visit.airport_id == Airport.airport_id) &
+            (Visit.user_id == user_id)
+        )
+        .group_by(
+            Airport.airport_id,
+            Airport.name,
+            Airport.city,
+            Airport.state,
+            Airport.latitude,
+            Airport.longitude,
+            Airport.towered_status,
+        )
+    )
 
 # =========================================================
 # 🧾 RAW VISITS (giữ lại nhưng clean hơn)
 # =========================================================
-@router.get("/")
-def get_visits(
+@router.get("/airports")
+def get_airports_by_user(
     user_id: str,
-    airport_id: Optional[str] = None,
+    visited: Optional[bool] = None,
     city: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 20,
-    sort_by: str = "date_visited",
-    order: str = "desc",
-    db: Session = Depends(get_db)
-):
-    query = (
-        db.query(Visit, Airport)
-        .join(Airport, Visit.airport_id == Airport.airport_id)
-        .filter(Visit.user_id == user_id)
-    )
+    bbox: Optional[str] = None,
 
-    if airport_id:
-        query = query.filter(Visit.airport_id == airport_id)
-
-    if city:
-        query = query.filter(Airport.city.ilike(f"%{city}%"))
-
-    # sort
-    sort_column = Visit.date_visited if sort_by == "date_visited" else Visit.id
-    query = query.order_by(sort_column.desc() if order == "desc" else sort_column.asc())
-
-    results = query.offset(skip).limit(limit).all()
-
-    data = [
-        {
-            "id": visit.id,
-            "airport": {
-                "airport_id": airport.airport_id,
-                "name": airport.name,
-                "city": airport.city,
-                "state": airport.state,
-            },
-            "date_visited": visit.date_visited,
-            "callsign": visit.callsign,
-            "notes": visit.notes,
-        }
-        for visit, airport in results
-    ]
-
-    return success_response(data)
-
-
-# =========================================================
-# 🧾 MY RAW VISITS (AUTH)
-# =========================================================
-@router.get("/me")
-def get_my_visits(
-    airport_id: Optional[str] = None,
-    city: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 20,
-    sort_by: str = "date_visited",
-    order: str = "desc",
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
 ):
-    query = (
-        db.query(Visit, Airport)
-        .join(Airport, Visit.airport_id == Airport.airport_id)
-        .filter(Visit.user_id == user.id)
-    )
+    query = build_airport_query(db, user_id)
 
-    if airport_id:
-        query = query.filter(Visit.airport_id == airport_id)
+    # =====================
+    # 📦 BBOX
+    # =====================
+    if bbox:
+        parsed = parse_bbox(bbox)
+        if parsed:
+            min_lng, min_lat, max_lng, max_lat = parsed
 
+            query = query.filter(
+                Airport.latitude.between(min_lat, max_lat),
+                Airport.longitude.between(min_lng, max_lng),
+            )
+
+    # =====================
+    # 🔍 FILTER
+    # =====================
     if city:
         query = query.filter(Airport.city.ilike(f"%{city}%"))
 
-    # safe sort
-    if sort_by == "date_visited":
-        sort_column = Visit.date_visited
-    elif sort_by == "created_at" and hasattr(Visit, "created_at"):
-        sort_column = Visit.created_at
-    else:
-        sort_column = Visit.id
+    if visited is True:
+        query = query.having(func.count(Visit.id) > 0)
+    elif visited is False:
+        query = query.having(func.count(Visit.id) == 0)
 
-    query = query.order_by(sort_column.desc() if order == "desc" else sort_column.asc())
+    rows = query.limit(500).all()
 
-    limit = min(limit, 100)
-    results = query.offset(skip).limit(limit).all()
+    return success_response([serialize_airport(r) for r in rows])
 
-    data = [
-        {
-            "id": visit.id,
-            "airport": {
-                "airport_id": airport.airport_id,
-                "name": airport.name,
-                "city": airport.city,
-                "state": airport.state,
-            },
-            "date_visited": visit.date_visited,
-            "callsign": visit.callsign,
-            "notes": visit.notes,
-        }
-        for visit, airport in results
-    ]
 
-    return success_response(data)
+# # =========================================================
+# # 🧾 MY RAW VISITS (AUTH)
+# # =========================================================
+# @router.get("/me")
+# def get_my_visits(
+#     airport_id: Optional[str] = None,
+#     city: Optional[str] = None,
+#     skip: int = 0,
+#     limit: int = 20,
+#     sort_by: str = "date_visited",
+#     order: str = "desc",
+#     db: Session = Depends(get_db),
+#     user = Depends(get_current_user)
+# ):
+#     query = (
+#         db.query(Visit, Airport)
+#         .join(Airport, Visit.airport_id == Airport.airport_id)
+#         .filter(Visit.user_id == user.id)
+#     )
+
+#     if airport_id:
+#         query = query.filter(Visit.airport_id == airport_id)
+
+#     if city:
+#         query = query.filter(Airport.city.ilike(f"%{city}%"))
+
+#     # safe sort
+#     if sort_by == "date_visited":
+#         sort_column = Visit.date_visited
+#     elif sort_by == "created_at" and hasattr(Visit, "created_at"):
+#         sort_column = Visit.created_at
+#     else:
+#         sort_column = Visit.id
+
+#     query = query.order_by(sort_column.desc() if odef parse_bbox(bbox: str):
+#     try:
+#         min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
+#         return min_lng, min_lat, max_lng, max_lat
+#     except:
+#         return Nonerder == "desc" else sort_column.asc())
+
+#     limit = min(limit, 100)
+#     results = query.offset(skip).limit(limit).all()
+
+#     data = [
+#         {
+#             "id": visit.id,
+#             "airport": {
+#                 "airport_id": airport.airport_id,
+#                 "name": airport.name,
+#                 "city": airport.city,
+#                 "state": airport.state,
+#             },
+#             "date_visited": visit.date_visited,
+#             "callsign": visit.callsign,
+#             "notes": visit.notes,
+#         }
+#         for visit, airport in results
+#     ]
+
+#     return success_response(data)
 
 
 
@@ -128,50 +178,40 @@ def get_my_visits(
 # 🗺️ VISITED AIRPORTS (🔥 MAIN API)
 # =========================================================
 @router.get("/me/airports")
-def get_my_visited_airports(
+def get_my_airports(
+    visited: Optional[bool] = None,
+    city: Optional[str] = None,
+    bbox: Optional[str] = None,
+
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    rows = (
-        db.query(
-            Visit.airport_id.label("id"),
-            Airport.name,
-            Airport.latitude,
-            Airport.longitude,
-            Airport.state,
-            Airport.towered_status,
-            func.count(Visit.id).label("visitCount"),
-            func.max(Visit.date_visited).label("last_visited"),
-            func.max(Visit.notes).label("notes"),
-            func.max(Visit.callsign).label("airCraft"),
-        )
-        .join(Airport, Visit.airport_id == Airport.airport_id)
-        .filter(Visit.user_id == user.id)
-        .group_by(
-            Visit.airport_id,
-            Airport.name,
-            Airport.latitude,
-            Airport.longitude,
-            Airport.state,
-            Airport.towered_status,
-        )
-        .all()
-    )
+    query = build_airport_query(db, user.id)
 
-    data = [
-        {
-            "id": r.id,
-            "name": r.name,
-            "lat": r.latitude,
-            "lng": r.longitude,
-            "state": r.state,
-            "status": r.towered_status,
-            "visitCount": r.visitCount,
-            "last_visited": r.last_visited,
-            "notes": r.notes,
-            "airCraft": r.airCraft,
-        }
-        for r in rows
-    ]
+    # =====================
+    # 📦 BBOX FILTER
+    # =====================
+    if bbox:
+        parsed = parse_bbox(bbox)
+        if parsed:
+            min_lng, min_lat, max_lng, max_lat = parsed
 
-    return success_response(data)
+            query = query.filter(
+                Airport.latitude.between(min_lat, max_lat),
+                Airport.longitude.between(min_lng, max_lng),
+            )
+
+    # =====================
+    # 🔍 FILTER
+    # =====================
+    if city:
+        query = query.filter(Airport.city.ilike(f"%{city}%"))
+
+    if visited is True:
+        query = query.having(func.count(Visit.id) > 0)
+    elif visited is False:
+        query = query.having(func.count(Visit.id) == 0)
+
+    rows = query.limit(500).all()
+
+    return success_response([serialize_airport(r) for r in rows])
