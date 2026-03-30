@@ -20,7 +20,7 @@ class UserResponse(BaseModel):
     last_name: Optional[str] = None
     handle: str | None
     avatar_url: str | None
-
+    total_airports: int = 0
     class Config:
         from_attributes = True
 
