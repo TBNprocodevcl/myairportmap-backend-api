@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routes import auth,airports, user, visits
+from app.api.routes import auth,airports, user, visits, achievements
 
 app = FastAPI()
 
@@ -7,3 +7,4 @@ app.include_router(auth.router, prefix="/auth")
 app.include_router(user.router, prefix="/users")
 app.include_router(airports.router, prefix="/airports")
 app.include_router(visits.router, prefix="/visits")
+app.include_router(achievements.router, prefix="/achievements")

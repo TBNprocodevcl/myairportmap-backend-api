@@ -1,5 +1,3 @@
-# app/api/routes/airports.py
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -7,6 +5,16 @@ from app.db.session import get_db
 from app.models.airport import Airport
 
 router = APIRouter(prefix="/airports", tags=["airports"])
+
+
+# ✅ reusable response
+def success_response(data, message: str = "Success"):
+    return {
+        "success": True,
+        "data": data,
+        "message": message
+    }
+
 
 @router.get("/")
 def get_airports(
@@ -24,7 +32,9 @@ def get_airports(
 ):
     query = db.query(Airport)
 
-    # FILTER
+    # =========================
+    # 🔎 FILTER
+    # =========================
     if city:
         query = query.filter(Airport.city.ilike(f"%{city}%"))
 
@@ -34,7 +44,9 @@ def get_airports(
     if towered:
         query = query.filter(Airport.towered_status.ilike(f"%{towered}%"))
 
-    # SEARCH
+    # =========================
+    # 🔍 SEARCH
+    # =========================
     if q:
         query = query.filter(
             or_(
@@ -44,7 +56,9 @@ def get_airports(
             )
         )
 
-    # BOUNDING BOX
+    # =========================
+    # 🗺️ BOUNDING BOX
+    # =========================
     if (
         min_lat is not None and
         max_lat is not None and
@@ -56,7 +70,26 @@ def get_airports(
             Airport.longitude.between(min_lng, max_lng),
         )
 
-    # PAGINATION
+    # =========================
+    # 📄 PAGINATION
+    # =========================
     limit = min(limit, 200)
+    results = query.offset(skip).limit(limit).all()
 
-    return query.offset(skip).limit(limit).all()
+    # =========================
+    # 🎯 MAP DATA (quan trọng)
+    # =========================
+    data = [
+        {
+            "airport_id": a.airport_id,
+            "name": a.name,
+            "city": a.city,
+            "state": a.state,
+            "lat": a.latitude,
+            "lng": a.longitude,
+            "towered_status": a.towered_status,
+        }
+        for a in results
+    ]
+
+    return success_response(data)

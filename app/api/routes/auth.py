@@ -15,6 +15,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
+from helper.response import success_response
+
 
 
 security = HTTPBearer()
@@ -44,7 +46,7 @@ def avatar_url_for_handle(handle: str):
 
 
 # 🔥 REGISTER
-@router.post("/register", response_model=UserResponse)
+@router.post("/register")
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
     exists = db.query(User).filter(User.email == data.email).first()
     if exists:
@@ -65,11 +67,14 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    return user
+    return success_response(
+        UserResponse.model_validate(user).model_dump(),
+        "User created successfully"
+    )
 
 
 # 🔐 LOGIN
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 def login(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
 
@@ -78,7 +83,14 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token({"sub": str(user.id)})
 
-    return {"access_token": token}
+    return success_response(
+        {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": UserResponse.model_validate(user).model_dump()
+        },
+        "Login successful"
+    )
 
 
 # 🔍 GET CURRENT USER
@@ -102,9 +114,11 @@ def get_current_user(
 
 
 # 👤 /me
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 def me(user = Depends(get_current_user)):
-    return user
+    return success_response(
+        UserResponse.model_validate(user).model_dump()
+    )
 
 
 @router.post("/google", response_model=TokenResponse)

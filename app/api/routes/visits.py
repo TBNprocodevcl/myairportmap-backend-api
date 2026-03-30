@@ -9,6 +9,7 @@ from app.models import Visit, Airport
 
 # ✅ IMPORT SCHEMA
 from app.schemas.visit import VisitedAirportResponse
+from helper.response import success_response
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 
@@ -45,10 +46,9 @@ def get_visits(
 
     results = query.offset(skip).limit(limit).all()
 
-    return [
+    data = [
         {
             "id": visit.id,
-            "user_id": visit.user_id,
             "airport": {
                 "airport_id": airport.airport_id,
                 "name": airport.name,
@@ -61,6 +61,8 @@ def get_visits(
         }
         for visit, airport in results
     ]
+
+    return success_response(data)
 
 
 # =========================================================
@@ -102,7 +104,7 @@ def get_my_visits(
     limit = min(limit, 100)
     results = query.offset(skip).limit(limit).all()
 
-    return [
+    data = [
         {
             "id": visit.id,
             "airport": {
@@ -118,11 +120,14 @@ def get_my_visits(
         for visit, airport in results
     ]
 
+    return success_response(data)
+
+
 
 # =========================================================
 # 🗺️ VISITED AIRPORTS (🔥 MAIN API)
 # =========================================================
-@router.get("/me/airports", response_model=List[VisitedAirportResponse])
+@router.get("/me/airports")
 def get_my_visited_airports(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
@@ -153,19 +158,20 @@ def get_my_visited_airports(
         .all()
     )
 
-    # ✅ map → schema
-    return [
-        VisitedAirportResponse(
-            id=r.id,
-            name=r.name,
-            lat=r.latitude,
-            lng=r.longitude,
-            state=r.state,
-            status=r.towered_status,
-            visitCount=r.visitCount,
-            last_visited=r.last_visited,
-            notes=r.notes,
-            airCraft=r.airCraft,
-        )
+    data = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "lat": r.latitude,
+            "lng": r.longitude,
+            "state": r.state,
+            "status": r.towered_status,
+            "visitCount": r.visitCount,
+            "last_visited": r.last_visited,
+            "notes": r.notes,
+            "airCraft": r.airCraft,
+        }
         for r in rows
     ]
+
+    return success_response(data)
