@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import UUID, func
 
+from app.constant.bussiness import CLASS_B_AIRPORTS
 from app.db.session import get_db
 from app.models.visit import Visit
 from app.models.airport import Airport
@@ -17,6 +18,19 @@ def success_response(data, message="Success"):
         "message": message
     }
 
+def normalize(code: str):
+    if len(code) == 3:
+        return f"K{code}"
+    return code
+
+def get_user_visited_airports(db: Session, user_id: str) -> set[str]:
+    rows = (
+        db.query(Visit.airport_id)
+        .filter(Visit.user_id == user_id)
+        .distinct()
+        .all()
+    )
+    return {normalize(r[0]) for r in rows}
 
 def get_phase(pct: float):
     if pct >= 100:
@@ -37,6 +51,91 @@ def get_icon(phase):
         "TAKE-OFF": "🛫"
     }.get(phase, "")
 
+@router.get("/class-b")
+def get_class_b_achievement(
+    user_id: str,
+    db: Session = Depends(get_db),
+):
+
+    visited_set = get_user_visited_airports(db, user_id)
+
+    # 👉 lấy thêm name từ Airport table (optional nhưng nên có)
+    airports = (
+        db.query(Airport.airport_id, Airport.name)
+        .all()
+    )
+
+    airport_map = {
+        normalize(a.airport_id): a.name
+        for a in airports
+    }
+
+    checklist = []
+    visited_count = 0
+
+    for airport_id in CLASS_B_AIRPORTS:
+        is_visited = airport_id in visited_set
+
+        if is_visited:
+            visited_count += 1
+
+        checklist.append({
+            "id": airport_id,
+            "name": airport_map.get(airport_id),
+            "visited": is_visited
+        })
+
+    total = len(CLASS_B_AIRPORTS)
+    percent = round((visited_count / total) * 100, 1)
+
+    # 👉 sort: visited lên trước (UI đẹp hơn)
+    checklist.sort(key=lambda x: not x["visited"])
+    phase = get_phase(percent)
+    icon = get_icon(phase)
+    return {
+        "title": "BRAVO",
+        "code": "CLASS_B",
+        "total": total,
+        "visited": visited_count,
+        "percent": percent,
+        "phase": phase,        
+        "icon": icon,  
+        "completed": visited_count == total,
+        "checklist": checklist
+    }
+
+
+# =========================
+# 🏆 ALL ACHIEVEMENTS (future-ready)
+# =========================
+@router.get("/")
+def get_all_achievements(
+    user_id: str,
+    db: Session = Depends(get_db),
+):
+
+    visited_set = get_user_visited_airports(db, user_id)
+
+    # 👉 Class B
+    class_b_total = len(CLASS_B_AIRPORTS)
+    class_b_visited = sum(1 for a in CLASS_B_AIRPORTS if a in visited_set)
+
+    class_b_percent = round((class_b_visited / class_b_total) * 100, 1)
+
+    achievements = [
+        {
+            "code": "CLASS_B",
+            "title": "BRAVO",
+            "total": class_b_total,
+            "visited": class_b_visited,
+            "percent": class_b_percent,
+            "completed": class_b_visited == class_b_total
+        }
+    ]
+
+    return {
+        "achievements": achievements
+    }
 
 @router.get("/states")
 def get_state_progress(

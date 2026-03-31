@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -9,21 +11,29 @@ from helper.response import success_response
 router = APIRouter(prefix="/runway360", tags=["runway360"])
 
 
+import re
+
 def normalize_runway(ident: str | None):
-    if not ident or ident.startswith("H"):
+    if not ident:
         return None
 
-    num = ""
-    for c in ident:
-        if c.isdigit():
-            num += c
-        else:
-            break
+    ident = ident.strip().upper()
 
-    if not num:
+    # ❌ heliport
+    if ident.startswith("H"):
         return None
 
-    r = int(num)
+    # ❌ N/S
+    if ident in {"N", "S"}:
+        return None
+
+    # ✅ lấy số đầu (handle: 18L, 06R, 16W, 5)
+    match = re.match(r"(\d{1,2})", ident)
+    if not match:
+        return None
+
+    r = int(match.group(1))
+
     return r if 1 <= r <= 36 else None
 
 
@@ -55,7 +65,7 @@ def get_runway360(user_id: str, db: Session = Depends(get_db)):
     )
 
     runway_map = {}
-
+    
     for airport_id, date_visited, note, le, he in rows:
         for ident in [le, he]:
             r = normalize_runway(ident)
@@ -81,4 +91,50 @@ def get_runway360(user_id: str, db: Session = Depends(get_db)):
         "percent": percent,
         "phase": phase,
         "runways": sorted(runway_map.values(), key=lambda x: x["runway"])
+    })
+
+@router.get("/club")
+def get_runway360_club(db: Session = Depends(get_db)):
+
+    rows = (
+        db.query(
+            Visit.user_id,
+            Runway.le_ident,
+            Runway.he_ident
+        )
+        .join(Runway, Visit.airport_id == Runway.airport_ident)
+        .all()
+    )
+
+    user_runways = defaultdict(set)
+    unique_runways = set()   # ✅ log global luôn
+
+    for user_id, le, he in rows:
+        for ident in [le, he]:
+            r = normalize_runway(ident)
+            if r:
+                user_runways[user_id].add(r)
+                unique_runways.add(r)   # ✅ log ở đây
+
+    # 🔥 DEBUG LOG
+    print("UNIQUE RUNWAYS:", len(unique_runways))
+    print("RUNWAYS LIST:", sorted(unique_runways))
+    for user_id, le, he in rows:
+        for ident in [le, he]:
+            r = normalize_runway(ident)
+            if r:
+                user_runways[user_id].add(r)
+
+    club_users = []
+
+    for user_id, runways in user_runways.items():
+        if len(runways) == 36:
+            club_users.append({
+                "user_id": user_id,
+                "total_runways": 36
+            })
+    
+    return success_response({
+        "club_size": len(club_users),
+        "users": club_users
     })
