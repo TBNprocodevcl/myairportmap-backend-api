@@ -139,11 +139,11 @@ def get_all_achievements(
 
 @router.get("/states")
 def get_state_progress(
+    user_id: str,
     state: str | None = Query(None),
     phase: str | None = Query(None),
 
     db: Session = Depends(get_db),
-    user = Depends(get_current_user)
 ):
     # =========================
     # 🧮 TOTAL airports per state
@@ -166,7 +166,7 @@ def get_state_progress(
             func.count(func.distinct(Visit.airport_id))
         )
         .join(Airport, Visit.airport_id == Airport.airport_id)
-        .filter(Visit.user_id == user.id)
+        .filter(Visit.user_id == user_id)
         .group_by(Airport.state)
         .all()
     )
