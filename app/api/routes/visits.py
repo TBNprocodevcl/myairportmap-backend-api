@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func
@@ -5,7 +7,7 @@ from typing import Optional, List
 
 from app.api.routes.auth import get_current_user
 from app.db.session import get_db
-from app.models import Visit, Airport
+from app.models import Visit, Airport, airport
 
 # ✅ IMPORT SCHEMA
 from app.schemas.visit import VisitedAirportResponse
@@ -300,6 +302,102 @@ def get_airport_visit_detail_by_user(
             "callsign": visit.callsign,
             "notes": visit.notes,
 
+            "airport": {
+                "id": airport.airport_id,
+                "name": airport.name,
+                "city": airport.city,
+                "state": airport.state,
+                "lat": airport.latitude,
+                "lng": airport.longitude,
+            }
+        }
+        for visit, airport in results
+    ]
+
+    return success_response(data)
+
+@router.get("/me/visits/search")
+def search_my_visits(
+    q: Optional[str] = None,          # search tổng (name, callsign, notes)
+    airport_name: Optional[str] = None,
+    callsign: Optional[str] = None,
+    notes: Optional[str] = None,
+
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+
+    skip: int = 0,
+    limit: int = 50,
+
+    sort_by: str = "date_visited",
+    order: str = "desc",
+
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    query = (
+        db.query(Visit, Airport)
+        .join(Airport, Visit.airport_id == Airport.airport_id)
+        .filter(Visit.user_id == user.id)
+    )
+
+    # =====================
+    # 🔍 SEARCH
+    # =====================
+    if q:
+        query = query.filter(
+            Airport.name.ilike(f"%{q}%") |
+            Visit.callsign.ilike(f"%{q}%") |
+            Visit.notes.ilike(f"%{q}%")
+        )
+
+    if airport_name:
+        query = query.filter(Airport.name.ilike(f"%{airport_name}%"))
+
+    if callsign:
+        query = query.filter(Visit.callsign.ilike(f"%{callsign}%"))
+
+    if notes:
+        query = query.filter(Visit.notes.ilike(f"%{notes}%"))
+
+    # =====================
+    # 📅 DATE FILTER
+    # =====================
+    if date_from:
+        query = query.filter(Visit.date_visited >= date_from)
+
+    if date_to:
+        query = query.filter(Visit.date_visited <= date_to)
+
+    # =====================
+    # 🔽 SORT
+    # =====================
+    if sort_by == "date_visited":
+        sort_column = Visit.date_visited
+    elif sort_by == "created_at" and hasattr(Visit, "created_at"):
+        sort_column = Visit.created_at
+    else:
+        sort_column = Visit.id
+
+    query = query.order_by(
+        sort_column.desc() if order == "desc" else sort_column.asc()
+    )
+
+    # =====================
+    # 📄 PAGINATION
+    # =====================
+    limit = min(limit, 100)
+    results = query.offset(skip).limit(limit).all()
+
+    # =====================
+    # 🎯 SERIALIZE
+    # =====================
+    data = [
+        {
+            "id": visit.id,
+            "date_visited": visit.date_visited,
+            "callsign": visit.callsign,
+            "notes": visit.notes,
             "airport": {
                 "id": airport.airport_id,
                 "name": airport.name,
