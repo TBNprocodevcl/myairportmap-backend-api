@@ -88,3 +88,55 @@ def get_users(
         data.append(u)
 
     return success_response(data)
+
+import time
+
+@router.get("/featured")
+def get_featured_users(
+    db: Session = Depends(get_db)
+):
+    # ========================
+    # ⏱️ TIME BLOCK (6h)
+    # ========================
+    current_time = int(time.time())
+    block = current_time // (6 * 3600)
+
+    # ========================
+    # 🔢 TOTAL USERS
+    # ========================
+    total_users = db.query(func.count(User.id)).scalar() or 0
+
+    if total_users == 0:
+        return success_response([])
+
+    # ========================
+    # 🎯 OFFSET BASED ON TIME
+    # ========================
+    offset = block % max(total_users - 4, 1)
+
+    # ========================
+    # 🧠 QUERY
+    # ========================
+    rows = (
+        db.query(
+            User,
+            func.count(func.distinct(Visit.airport_id)).label("total_airports")
+        )
+        .outerjoin(Visit, Visit.user_id == User.id)
+        .group_by(User.id)
+        .order_by(User.id)  # stable order
+        .offset(offset)
+        .limit(4)
+        .all()
+    )
+
+    # ========================
+    # 🎯 SERIALIZE
+    # ========================
+    data = []
+    for user, total_airports in rows:
+        u = UserResponse.model_validate(user).model_dump()
+        u["total_airports"] = total_airports
+        data.append(u)
+
+    return success_response(data)
