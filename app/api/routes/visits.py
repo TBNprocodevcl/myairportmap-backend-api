@@ -655,9 +655,7 @@ def import_foreflight_csv(
             callsign = row.get("AircraftID") or None
             route = row.get("Route") or ""
 
-            note_base = f"{route}".strip()
-
-            # ---------------------
+            note_base = (row.get("PilotComments") or "").strip()            # ---------------------
             # 🚫 DUPLICATE CHECK
             # ---------------------
             exists = db.query(Visit).filter(
@@ -680,7 +678,7 @@ def import_foreflight_csv(
                     airport_id=from_airport,
                     date_visited=date_visited,
                     callsign=callsign,
-                    notes=f"DEPARTURE | {note_base}"
+                    notes=f"{note_base}"
                 )
             )
 

@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routes import auth,airports, user, visits, achievements, runway360
+from app.api.routes import auth,airports, user, visits, achievements, runway360, export
 
 app = FastAPI()
 
@@ -9,3 +9,4 @@ app.include_router(airports.router, prefix="/airports")
 app.include_router(visits.router, prefix="/visits")
 app.include_router(achievements.router, prefix="/achievements")
 app.include_router(runway360.router, prefix="/runway360")
+app.include_router(export.router, prefix="/export")
