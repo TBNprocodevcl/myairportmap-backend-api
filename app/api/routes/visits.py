@@ -223,7 +223,85 @@ def get_airports_by_user(
 #     return success_response(data)
 
 
+@router.get("/me")
+def get_my_visits(
+    airport_id: Optional[str] = None,
+    city: Optional[str] = None,
+    bbox: Optional[str] = None,
 
+    skip: int = 0,
+    limit: int = 50,
+
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    query = (
+        db.query(Visit, Airport)
+        .join(Airport, Visit.airport_id == Airport.airport_id)
+        .filter(Visit.user_id == user.id)
+    )
+
+    # =====================
+    # 📦 BBOX
+    # =====================
+    if bbox:
+        parsed = parse_bbox(bbox)
+        if parsed:
+            min_lng, min_lat, max_lng, max_lat = parsed
+
+            query = query.filter(
+                Airport.latitude.between(min_lat, max_lat),
+                Airport.longitude.between(min_lng, max_lng),
+            )
+
+    # =====================
+    # 🔍 FILTER
+    # =====================
+    if airport_id:
+        airport_id = normalize_airport_id(airport_id)
+        query = query.filter(Visit.airport_id == airport_id)
+
+    if city:
+        query = query.filter(Airport.city.ilike(f"%{city}%"))
+
+    # =====================
+    # 🔽 SORT
+    # =====================
+    query = query.order_by(Visit.date_visited.desc(), Visit.id.desc())
+
+    # =====================
+    # 📄 PAGINATION
+    # =====================
+    limit = min(limit, 200)
+
+    results = query.offset(skip).limit(limit).all()
+
+    # =====================
+    # 📦 SERIALIZE
+    # =====================
+    data = []
+    for visit, airport in results:
+        data.append({
+            "id": visit.id,
+
+            "airport": {
+                "airport_id": airport.airport_id,
+                "name": airport.name,
+                "city": airport.city,
+                "state": airport.state,
+                "lat": airport.latitude,
+                "lng": airport.longitude,
+            },
+
+            "date_visited": visit.date_visited,
+            "callsign": visit.callsign,
+            "notes": visit.notes,
+        })
+
+    return success_response({
+        "total": len(data),
+        "items": data
+    })
 # =========================================================
 # 🗺️ VISITED AIRPORTS (🔥 MAIN API)
 # =========================================================
