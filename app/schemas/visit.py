@@ -20,3 +20,11 @@ class VisitedAirportResponse(AirportBase):
 
     class Config:
         from_attributes = True  # dùng cho SQLAlchemy (pydantic v2)
+
+class FlightCreateRequest(BaseModel):
+    from_airport_id: str
+    to_airport_id: str
+    date_visited: date
+
+    callsign: Optional[str] = None
+    notes: Optional[str] = None

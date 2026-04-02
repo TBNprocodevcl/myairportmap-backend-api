@@ -10,8 +10,11 @@ from app.db.session import get_db
 from app.models import Visit, Airport, airport
 
 # ✅ IMPORT SCHEMA
-from app.schemas.visit import VisitedAirportResponse
+from app.schemas.visit import FlightCreateRequest, VisitedAirportResponse
 from helper.response import success_response
+
+from fastapi import HTTPException
+
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 def serialize_airport(r):
@@ -411,3 +414,61 @@ def search_my_visits(
     ]
 
     return success_response(data)
+@router.post("/create/visits")
+def create_flight_as_visits(
+    payload: FlightCreateRequest,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    # =====================
+    # 🔍 VALIDATE
+    # =====================
+    if payload.from_airport_id == payload.to_airport_id:
+        raise HTTPException(400, "from and to cannot be the same")
+
+    from_airport = db.query(Airport).filter(
+        Airport.airport_id == payload.from_airport_id
+    ).first()
+
+    to_airport = db.query(Airport).filter(
+        Airport.airport_id == payload.to_airport_id
+    ).first()
+
+    if not from_airport or not to_airport:
+        raise HTTPException(400, "Invalid airport")
+
+    # =====================
+    # ✈️ CREATE 2 VISITS
+    # =====================
+    visit_from = Visit(
+        user_id=user.id,
+        airport_id=payload.from_airport_id,
+        date_visited=payload.date_visited,
+        callsign=payload.callsign,
+        notes=f"DEPARTURE | {payload.notes or ''}".strip(),
+    )
+
+    visit_to = Visit(
+        user_id=user.id,
+        airport_id=payload.to_airport_id,
+        date_visited=payload.date_visited,
+        callsign=payload.callsign,
+        notes=f"ARRIVAL | {payload.notes or ''}".strip(),
+    )
+
+    db.add_all([visit_from, visit_to])
+    db.commit()
+
+    db.refresh(visit_from)
+    db.refresh(visit_to)
+
+    return success_response({
+        "from": {
+            "id": visit_from.id,
+            "airport_id": visit_from.airport_id,
+        },
+        "to": {
+            "id": visit_to.id,
+            "airport_id": visit_to.airport_id,
+        }
+    })
