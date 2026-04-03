@@ -252,6 +252,24 @@ def get_all_achievements(
     return success_response(achievements)
 
 
+# @router.get("/states")
+# def get_state_progress(
+#     user_id: str,
+#     state: str | None = Query(None),
+#     phase: str | None = Query(None),
+#     db: Session = Depends(get_db),
+# ):
+#     result = build_state_progress(db, user_id)
+
+#     if state:
+#         result = [r for r in result if r["state"].lower() == state.lower()]
+
+#     if phase:
+#         result = [r for r in result if r["phase"].lower() == phase.lower()]
+
+#     result.sort(key=lambda x: x["percentage"], reverse=True)
+
+#     return success_response(result)
 @router.get("/states")
 def get_state_progress(
     user_id: str,
@@ -259,14 +277,92 @@ def get_state_progress(
     phase: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    result = build_state_progress(db, user_id)
 
+    visited = set(
+        r[0] for r in db.query(Visit.airport_id)
+        .filter(Visit.user_id == user_id)
+        .all()
+    )
+
+    all_airport_ids = [aid for aids in STATE_AIRPORTS.values() for aid in aids]
+
+    airports = (
+        db.query(Airport)
+        .filter(Airport.airport_id.in_(all_airport_ids))
+        .all()
+    )
+    airport_map = {a.airport_id: a for a in airports}
+
+    result = []
+
+    total_all = 0
+    visited_all = 0
+
+    for st, airport_ids in STATE_AIRPORTS.items():
+
+        checklist = []
+        visited_count = 0
+
+        for aid in airport_ids:
+            is_visited = aid in visited
+
+            if is_visited:
+                visited_count += 1
+
+            a = airport_map.get(aid)
+
+            checklist.append({
+                "airport_id": aid,
+                "name": a.name if a else None,
+                "visited": is_visited
+            })
+
+        total = len(airport_ids)
+        pct = (visited_count / total * 100) if total else 0
+        completed = visited_count == total
+        ph = get_phase(pct)
+
+        result.append({
+            "state": st,
+            "visited": visited_count,
+            "total": total,
+            "percentage": round(pct, 1),
+            "phase": ph,
+            "icon": get_icon(ph),
+            "completed": completed,
+            "badge_url": f"/states/{st}/badge" if completed else None,
+
+            # 🔥 embedded checklist
+            "airports": checklist
+        })
+
+        total_all += total
+        visited_all += visited_count
+
+    # ✅ CONUS
+    pct_all = (visited_all / total_all * 100) if total_all else 0
+    ph_all = get_phase(pct_all)
+
+    result.append({
+        "state": "CONUS",
+        "visited": visited_all,
+        "total": total_all,
+        "percentage": round(pct_all, 1),
+        "phase": ph_all,
+        "icon": get_icon(ph_all),
+        "completed": visited_all == total_all,
+        "badge_url": None,
+        "airports": []  # hoặc bỏ field này
+    })
+
+    # ✅ filter
     if state:
         result = [r for r in result if r["state"].lower() == state.lower()]
 
     if phase:
         result = [r for r in result if r["phase"].lower() == phase.lower()]
 
+    # ✅ sort
     result.sort(key=lambda x: x["percentage"], reverse=True)
 
     return success_response(result)
