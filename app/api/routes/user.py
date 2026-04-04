@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
+from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.models.visit import Visit
-from app.schemas.user import UpdateSharedRequest, UserResponse
+from app.schemas.user import UpdateProfileRequest, UpdateSharedRequest, UserResponse
 from helper.response import success_response
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -163,3 +164,30 @@ def update_shared_status(
         "id": str(user.id),
         "is_shared": user.is_shared
     })
+
+@router.put("/profile")
+def update_profile(
+    payload: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    # 🔥 FIX: lấy user từ session hiện tại
+    db_user = db.query(User).filter(User.id == user.id).first()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # update
+    if payload.handle:
+        db_user.handle = payload.handle
+
+    if payload.avatar_url is not None:
+        db_user.avatar_url = payload.avatar_url
+
+    db.commit()
+    db.refresh(db_user)  # ✅ giờ OK
+
+    return success_response(
+        UserResponse.model_validate(db_user).model_dump(),
+        "Profile updated successfully"
+    )

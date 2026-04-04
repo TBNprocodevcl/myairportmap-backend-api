@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean
+from sqlalchemy import Column, ForeignKey, Integer, String, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -19,4 +19,10 @@ class User(Base):
     google_id = Column(String, nullable=True)
     visits = relationship("Visit", backref="user")
     is_shared = Column(Boolean, default=False)
+    
+    certifications = relationship(
+        "Certification",
+        secondary="user_certifications",
+        backref="users"
+    )
 

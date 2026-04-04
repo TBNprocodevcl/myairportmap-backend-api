@@ -1,6 +1,7 @@
+import re
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 
 class RegisterRequest(BaseModel):
@@ -31,3 +32,12 @@ class TokenResponse(BaseModel):
 
 class UpdateSharedRequest(BaseModel):
     is_shared: bool
+
+class UpdateProfileRequest(BaseModel):
+    handle: Optional[str] = Field(None, min_length=3, max_length=20)
+    avatar_url: Optional[str] = None
+
+    def validate_handle(self):
+        if self.handle:
+            if not re.match(r"^[a-zA-Z0-9_-]+$", self.handle):
+                raise ValueError("Invalid handle format")
