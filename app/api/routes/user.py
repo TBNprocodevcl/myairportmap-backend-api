@@ -1,12 +1,12 @@
 from typing import Optional, List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from app.db.session import get_db
 from app.models.user import User
 from app.models.visit import Visit
-from app.schemas.user import UserResponse
+from app.schemas.user import UpdateSharedRequest, UserResponse
 from helper.response import success_response
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -140,3 +140,26 @@ def get_featured_users(
         data.append(u)
 
     return success_response(data)
+
+@router.put("/user/shared")
+def update_shared_status(
+    user_id: str,
+    payload: UpdateSharedRequest,
+    db: Session = Depends(get_db)
+):
+    # 🔍 find user
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ✏️ update
+    user.is_shared = payload.is_shared
+
+    db.commit()
+    db.refresh(user)
+
+    return success_response({
+        "id": str(user.id),
+        "is_shared": user.is_shared
+    })

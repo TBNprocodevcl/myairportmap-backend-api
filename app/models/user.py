@@ -18,3 +18,5 @@ class User(Base):
     password = Column(String)
     google_id = Column(String, nullable=True)
     visits = relationship("Visit", backref="user")
+    is_shared = Column(Boolean, default=False)
+
