@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models.runway_landings import RunwayLanding
+from app.models.user import User
 from app.models.visit import Visit
 from app.models.runway import Runway
 from app.schemas.runway import Runway360SaveRequest
+from app.schemas.user import UserResponse
 from helper.response import success_response
 
 router = APIRouter(prefix="/runway360", tags=["runway360"])
@@ -185,24 +187,29 @@ def get_runway360_club(db: Session = Depends(get_db)):
 
     rows = (
         db.query(
-            RunwayLanding.user_id,
-            func.count(RunwayLanding.runway_heading.distinct()).label("total")
+            User,
+            func.count(RunwayLanding.runway_heading.distinct()).label("total"),
+            func.max(RunwayLanding.date).label("completed_at")
         )
-        .group_by(RunwayLanding.user_id)
+        .join(RunwayLanding, RunwayLanding.user_id == User.id)
+        .group_by(User.id)
+        .having(func.count(RunwayLanding.runway_heading.distinct()) == 36)
         .all()
     )
 
-    club_users = [
-        {
-            "user_id": r.user_id,
-            "total_runways": r.total
-        }
-        for r in rows if r.total == 36
-    ]
+    data = []
+
+    for user, total, completed_at in rows:
+        u = UserResponse.model_validate(user).model_dump()
+
+        u["total_runways"] = total
+        u["completed_at"] = completed_at
+
+        data.append(u)
 
     return success_response({
-        "club_size": len(club_users),
-        "users": club_users
+        "club_size": len(data),
+        "users": data
     })
 
 @router.get("/manage")
@@ -240,29 +247,117 @@ def get_runway360_manage(
         "data": result
     })
 
+# @router.post("/manage")
+# def save_runway360(
+#     payload: Runway360SaveRequest,
+#     db: Session = Depends(get_db),
+#     user=Depends(get_current_user)
+# ):
+#     for heading, value in payload.data.items():
+
+#         # nếu bạn dùng Dict[str,...] thì cần convert
+#         heading = int(heading)
+
+#         existing = db.query(RunwayLanding).filter(
+#             RunwayLanding.user_id == user.id,
+#             RunwayLanding.runway_heading == heading
+#         ).first()
+
+#         # ❌ user xóa ô
+#         if value is None:
+#             if existing:
+#                 db.delete(existing)
+#             continue
+
+#         # insert nếu chưa có
+#         if not existing:
+#             existing = RunwayLanding(
+#                 user_id=user.id,
+#                 runway_heading=heading
+#             )
+#             db.add(existing)
+
+#         # update
+#         existing.airport_id = value.airport_id
+#         existing.date = value.date
+#         existing.aircraft = value.aircraft
+#         existing.notes = value.notes
+
+#     db.commit()
+
+#     # 🔥 tính lại progress
+#     completed = db.query(RunwayLanding).filter(
+#         RunwayLanding.user_id == user.id
+#     ).count()
+
+#     total = 36
+#     percent = round(completed / total * 100, 1)
+
+#     return success_response(
+#         data={
+#             "completed": completed,
+#             "total": total,
+#             "percent": percent
+#         },
+#         message="Saved successfully"
+#     )
+
 @router.post("/manage")
 def save_runway360(
     payload: Runway360SaveRequest,
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    # =========================
+    # 1. Load tất cả data hiện tại (1 query)
+    # =========================
+    existing_rows = db.query(RunwayLanding).filter(
+        RunwayLanding.user_id == user.id
+    ).all()
+
+    existing_map = {
+        r.runway_heading: r for r in existing_rows
+    }
+
+    # =========================
+    # 2. Helper detect empty
+    # =========================
+    def is_empty(v):
+        return (
+            not v
+            or (
+                not v.airport_id
+                and not v.date
+                and not v.aircraft
+                and not v.notes
+            )
+        )
+
+    # =========================
+    # 3. Loop payload (UPSERT + DELETE)
+    # =========================
+    payload_headings = set()
+
     for heading, value in payload.data.items():
+        try:
+            heading = int(heading)
+        except:
+            continue
 
-        # nếu bạn dùng Dict[str,...] thì cần convert
-        heading = int(heading)
+        if not (1 <= heading <= 36):
+            continue
 
-        existing = db.query(RunwayLanding).filter(
-            RunwayLanding.user_id == user.id,
-            RunwayLanding.runway_heading == heading
-        ).first()
+        payload_headings.add(heading)
 
-        # ❌ user xóa ô
-        if value is None:
+        existing = existing_map.get(heading)
+
+        # ❌ DELETE
+        if is_empty(value):
             if existing:
                 db.delete(existing)
             continue
 
-        # insert nếu chưa có
+        # ➕ INSERT
         if not existing:
             existing = RunwayLanding(
                 user_id=user.id,
@@ -270,27 +365,35 @@ def save_runway360(
             )
             db.add(existing)
 
-        # update
+        # ✏️ UPDATE
         existing.airport_id = value.airport_id
         existing.date = value.date
         existing.aircraft = value.aircraft
         existing.notes = value.notes
 
+    # =========================
+    # 4. DELETE những cái KHÔNG có trong payload
+    # =========================
+    for heading, row in existing_map.items():
+        if heading not in payload_headings:
+            db.delete(row)
+
     db.commit()
 
-    # 🔥 tính lại progress
+    # =========================
+    # 5. Progress
+    # =========================
     completed = db.query(RunwayLanding).filter(
         RunwayLanding.user_id == user.id
     ).count()
 
     total = 36
-    percent = round(completed / total * 100, 1)
 
     return success_response(
         data={
             "completed": completed,
             "total": total,
-            "percent": percent
+            "percent": round(completed / total * 100, 1)
         },
         message="Saved successfully"
     )
