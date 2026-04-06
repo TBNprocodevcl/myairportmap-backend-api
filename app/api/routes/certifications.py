@@ -6,7 +6,8 @@ from app.models.certification import Certification
 from app.models.user import User
 from app.schemas.certification import (
     CertificationResponse,
-    UpdateUserCertificationsRequest
+    UpdateUserCertificationsRequest,
+    UpdateUserCertificationsRequest2
 )
 from app.api.routes.auth import get_current_user
 from helper.response import success_response
@@ -51,23 +52,25 @@ def get_all_with_user_status(
 # ✅ 3. Update certifications (checkbox save)
 @router.put("/me")
 def update_my_certifications(
-    payload: UpdateUserCertificationsRequest,
+    payload: UpdateUserCertificationsRequest2,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # ❗ chỉ update nếu FE có gửi field này
-    if payload.certification_ids is not None:
+    # 🔥 Lấy user từ chính session db
+    user = db.query(User).filter(User.id == current_user.id).first()
 
-        if len(payload.certification_ids) == 0:
-            # user bỏ hết checkbox
-            current_user.certifications = []
+    checked_ids = list(set(
+        item.id for item in payload.items if item.checked
+    ))
 
-        else:
-            certs = db.query(Certification).filter(
-                Certification.id.in_(payload.certification_ids)
-            ).all()
+    certs = db.query(Certification).filter(
+        Certification.id.in_(checked_ids)
+    ).all()
 
-            current_user.certifications = certs
+    if len(certs) != len(checked_ids):
+        return success_response(None, message="Invalid certification IDs")
+
+    user.certifications = certs
 
     db.commit()
 

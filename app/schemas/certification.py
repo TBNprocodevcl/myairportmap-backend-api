@@ -15,3 +15,10 @@ class CertificationResponse(BaseModel):
 
 class UpdateUserCertificationsRequest(BaseModel):
     certification_ids: List[UUID]
+
+class CertificationItem(BaseModel):
+    id: UUID
+    checked: bool
+
+class UpdateUserCertificationsRequest2(BaseModel):
+    items: List[CertificationItem]
