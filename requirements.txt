@@ -43,3 +43,4 @@ uvicorn==0.42.0
 Werkzeug==3.1.7
 pandas
 python-multipart
+Pillow

@@ -1,9 +1,13 @@
 from collections import defaultdict
+from io import BytesIO
+import os
 
-from fastapi import APIRouter, Depends
+from PIL import ImageFont, Image, ImageDraw
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import app
 from app.api.routes.auth import get_current_user
 from app.db.session import get_db
 from app.models.runway_landings import RunwayLanding
@@ -13,11 +17,95 @@ from app.models.runway import Runway
 from app.schemas.runway import Runway360SaveRequest
 from app.schemas.user import UserResponse
 from helper.response import success_response
+import re
+
 
 router = APIRouter(prefix="/runway360", tags=["runway360"])
+RUNWAY360_CARD_TEMPLATE_PATH="static/runway360_card_template.png"
 
 
-import re
+def _load_font(size: int, bold: bool = True) -> ImageFont.ImageFont:
+    path = "static/fonts/Inter_28pt-Bold.ttf" if bold else "static/fonts/Inter_18pt-Black.ttf"
+    return ImageFont.truetype(path, size)
+
+def generate_runway360_share_card_png(
+    handle: str,
+    completed_iso: str | None
+) -> bytes:
+    handle = (handle or "").strip().lower()
+    if not handle:
+        raise ValueError("Missing handle")
+
+    if not os.path.exists(RUNWAY360_CARD_TEMPLATE_PATH):
+        raise FileNotFoundError("Missing template")
+
+    # Load base image
+    base = Image.open(RUNWAY360_CARD_TEMPLATE_PATH).convert("RGBA")
+    W, H = base.size
+
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # -------------------------
+    # Format date
+    # -------------------------
+    def fmt_mdy(iso: str | None) -> str:
+        if not iso:
+            return ""
+        try:
+            date_part = iso.split("T")[0].split(" ")[0]
+            y, m, d = date_part.split("-")
+            return f"{int(m)}/{int(d)}/{int(y)}"
+        except Exception:
+            return ""
+
+    # -------------------------
+    # Draw centered text
+    # -------------------------
+    def draw_center(txt, y, font, fill, shadow=True):
+        if not txt:
+            return
+        bbox = draw.textbbox((0, 0), txt, font=font)
+        x = (W - (bbox[2] - bbox[0])) // 2
+
+        if shadow:
+            draw.text((x+2, y+2), txt, font=font, fill=(0, 0, 0, 150))
+
+        draw.text((x, y), txt, font=font, fill=fill)
+
+    # -------------------------
+    # Prepare content
+    # -------------------------
+    date_text = fmt_mdy(completed_iso)
+
+    font_handle = _load_font(int(H * 0.06), bold=True)
+    font_date = _load_font(int(H * 0.04), bold=False)
+
+    # -------------------------
+    # Layout (relative)
+    # -------------------------
+    pill_top = int(H * 0.705)
+    pill_bottom = int(H * 0.755)
+    pill_h = pill_bottom - pill_top
+
+    y_handle = pill_top - int(pill_h * 1.6)
+    y_date = pill_bottom + int(pill_h * 0.6)
+
+    # -------------------------
+    # Draw
+    # -------------------------
+    draw_center(handle, y_handle, font_handle, (235, 238, 245, 235))
+    draw_center(date_text, y_date, font_date, (210, 215, 225, 225), shadow=False)
+
+    # -------------------------
+    # Merge & export
+    # -------------------------
+    out = Image.alpha_composite(base, overlay).convert("RGB")
+
+    bio = BytesIO()
+    out.save(bio, format="PNG", optimize=True)
+
+    return bio.getvalue()
 
 def normalize_runway(ident: str | None):
     if not ident:
@@ -396,4 +484,74 @@ def save_runway360(
             "percent": round(completed / total * 100, 1)
         },
         message="Saved successfully"
+    )
+
+@router.get("/share-card")
+def download_runway360_share_card(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    # ------------------------------------------------------------
+    # 1. Lấy toàn bộ runway của user
+    # ------------------------------------------------------------
+    rows = db.query(RunwayLanding).filter(
+        RunwayLanding.user_id == user.id
+    ).all()
+
+    # ------------------------------------------------------------
+    # 2. Build set runway completed (1–36)
+    # ------------------------------------------------------------
+    completed_set = set()
+
+    for r in rows:
+        if not r.runway_heading or not (1 <= r.runway_heading <= 36):
+            continue
+        completed_set.add(r.runway_heading)
+
+    completed = len(completed_set)
+
+    # ------------------------------------------------------------
+    # 3. Check complete
+    # ------------------------------------------------------------
+    if completed < 36:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Runway 360 not complete ({completed}/36)"
+        )
+
+    # ------------------------------------------------------------
+    # 4. Lấy ngày complete (optional)
+    # 👉 ví dụ: lấy ngày mới nhất
+    # ------------------------------------------------------------
+    completed_at = db.query(func.max(RunwayLanding.date)).filter(
+        RunwayLanding.user_id == user.id,
+        RunwayLanding.runway_heading.in_(list(completed_set))
+    ).scalar()
+
+    completed_iso = completed_at.isoformat() if completed_at else None
+
+    # ------------------------------------------------------------
+    # 5. Generate PNG
+    # ------------------------------------------------------------
+    try:
+        png_bytes = generate_runway360_share_card_png(
+            handle=user.handle,               # hoặc user.username
+            completed_iso=completed_iso       # 👈 truyền thêm vào
+        )
+    except Exception as e:
+        print("generate share card failed:", repr(e))
+        raise HTTPException(status_code=500, detail="Failed to generate card")
+
+    # ------------------------------------------------------------
+    # 6. Return file download
+    # ------------------------------------------------------------
+    filename = f"runway360_{user.handle}.png"
+
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store"
+        }
     )
