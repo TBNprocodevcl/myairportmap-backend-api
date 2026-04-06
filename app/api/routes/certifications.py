@@ -28,14 +28,21 @@ def get_certifications(db: Session = Depends(get_db)):
 
 
 # ✅ 2. Get certifications của user
-@router.get("/me")
-def get_my_certifications(
+@router.get("/me/all")
+def get_all_with_user_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    all_certs = db.query(Certification).all()
+
+    user_cert_ids = {c.id for c in current_user.certifications}
+
     data = [
-        CertificationResponse.model_validate(c).model_dump()
-        for c in current_user.certifications
+        {
+            **CertificationResponse.model_validate(c).model_dump(),
+            "checked": c.id in user_cert_ids
+        }
+        for c in all_certs
     ]
 
     return success_response(data)
