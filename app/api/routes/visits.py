@@ -281,7 +281,7 @@ def get_my_airports(
 
     return success_response([serialize_airport(r) for r in rows])
 
-@router.get("/visit/airports/{handle}")
+@router.get("/airports/{handle}")
 def get_airports_by_handle(
     handle: str,
     visited: Optional[bool] = None,
