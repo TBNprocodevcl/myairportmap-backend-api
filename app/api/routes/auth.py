@@ -36,7 +36,15 @@ def get_db():
         yield db
     finally:
         db.close()
+def generate_unique_handle(db: Session, base_handle: str):
+    handle = base_handle
+    counter = 1
 
+    while db.query(User).filter(User.handle == handle).first():
+        handle = f"{base_handle}{counter}"
+        counter += 1
+
+    return handle
 
 def normalize_handle(email: str):
     return email.split("@")[0].lower()
@@ -52,7 +60,8 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
     if exists:
         raise HTTPException(400, "Email already exists")
 
-    handle = normalize_handle(data.email)
+    base_handle = normalize_handle(data.email)
+    handle = generate_unique_handle(db, base_handle)
 
     user = User(
         email=data.email,

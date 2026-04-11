@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.models import Visit, Airport, airport
 
 # ✅ IMPORT SCHEMA
+from app.models.user import User
 from app.schemas.visit import FlightCreateRequest, VisitedAirportResponse
 from helper.response import success_response
 
@@ -159,70 +160,6 @@ def get_airports_by_user(
 
     return success_response([serialize_airport(r) for r in rows])
 
-
-# # =========================================================
-# # 🧾 MY RAW VISITS (AUTH)
-# # =========================================================
-# @router.get("/me")
-# def get_my_visits(
-#     airport_id: Optional[str] = None,
-#     city: Optional[str] = None,
-#     skip: int = 0,
-#     limit: int = 20,
-#     sort_by: str = "date_visited",
-#     order: str = "desc",
-#     db: Session = Depends(get_db),
-#     user = Depends(get_current_user)
-# ):
-#     query = (
-#         db.query(Visit, Airport)
-#         .join(Airport, Visit.airport_id == Airport.airport_id)
-#         .filter(Visit.user_id == user.id)
-#     )
-
-#     if airport_id:
-#         query = query.filter(Visit.airport_id == airport_id)
-
-#     if city:
-#         query = query.filter(Airport.city.ilike(f"%{city}%"))
-
-#     # safe sort
-#     if sort_by == "date_visited":
-#         sort_column = Visit.date_visited
-#     elif sort_by == "created_at" and hasattr(Visit, "created_at"):
-#         sort_column = Visit.created_at
-#     else:
-#         sort_column = Visit.id
-
-#     query = query.order_by(sort_column.desc() if odef parse_bbox(bbox: str):
-#     try:
-#         min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
-#         return min_lng, min_lat, max_lng, max_lat
-#     except:
-#         return Nonerder == "desc" else sort_column.asc())
-
-#     limit = min(limit, 100)
-#     results = query.offset(skip).limit(limit).all()
-
-#     data = [
-#         {
-#             "id": visit.id,
-#             "airport": {
-#                 "airport_id": airport.airport_id,
-#                 "name": airport.name,
-#                 "city": airport.city,
-#                 "state": airport.state,
-#             },
-#             "date_visited": visit.date_visited,
-#             "callsign": visit.callsign,
-#             "notes": visit.notes,
-#         }
-#         for visit, airport in results
-#     ]
-
-#     return success_response(data)
-
-
 @router.get("/me")
 def get_my_visits(
     airport_id: Optional[str] = None,
@@ -318,6 +255,60 @@ def get_my_airports(
 
     # =====================
     # 📦 BBOX FILTER
+    # =====================
+    if bbox:
+        parsed = parse_bbox(bbox)
+        if parsed:
+            min_lng, min_lat, max_lng, max_lat = parsed
+
+            query = query.filter(
+                Airport.latitude.between(min_lat, max_lat),
+                Airport.longitude.between(min_lng, max_lng),
+            )
+
+    # =====================
+    # 🔍 FILTER
+    # =====================
+    if city:
+        query = query.filter(Airport.city.ilike(f"%{city}%"))
+
+    if visited is True:
+        query = query.having(func.count(Visit.id) > 0)
+    elif visited is False:
+        query = query.having(func.count(Visit.id) == 0)
+
+    rows = query.limit(500).all()
+
+    return success_response([serialize_airport(r) for r in rows])
+
+@router.get("/visit/airports/{handle}")
+def get_airports_by_handle(
+    handle: str,
+    visited: Optional[bool] = None,
+    city: Optional[str] = None,
+    bbox: Optional[str] = None,
+
+    db: Session = Depends(get_db),
+):
+    # =====================
+    # 🔍 FIND USER
+    # =====================
+    user = (
+        db.query(User)
+        .filter(func.lower(User.handle) == handle.lower())
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # =====================
+    # 📦 BASE QUERY
+    # =====================
+    query = build_airport_query(db, user.id)
+
+    # =====================
+    # 📦 BBOX
     # =====================
     if bbox:
         parsed = parse_bbox(bbox)
