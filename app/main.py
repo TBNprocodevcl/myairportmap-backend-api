@@ -14,3 +14,8 @@ app.include_router(export.router, prefix="/export")
 app.include_router(upload.router, prefix="/upload")
 app.include_router(certifications.router, prefix="/certifications")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount(
+    "/.well-known",
+    StaticFiles(directory="well-known"),
+    name="well-known"
+)

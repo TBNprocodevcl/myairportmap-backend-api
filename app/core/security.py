@@ -44,6 +44,14 @@ def create_access_token(data: dict) -> str:
     )
     return encoded_jwt
 
+def create_reset_token(data: dict):
+    to_encode = data.copy()
+    to_encode.update({"type": "reset"})
+
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 # ========================
 # 🔍 DECODE TOKEN

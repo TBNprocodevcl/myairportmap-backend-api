@@ -41,3 +41,10 @@ class UpdateProfileRequest(BaseModel):
         if self.handle:
             if not re.match(r"^[a-zA-Z0-9_-]+$", self.handle):
                 raise ValueError("Invalid handle format")
+            
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str

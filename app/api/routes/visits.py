@@ -287,12 +287,9 @@ def get_airports_by_handle(
     visited: Optional[bool] = None,
     city: Optional[str] = None,
     bbox: Optional[str] = None,
-
     db: Session = Depends(get_db),
 ):
-    # =====================
     # 🔍 FIND USER
-    # =====================
     user = (
         db.query(User)
         .filter(func.lower(User.handle) == handle.lower())
@@ -302,14 +299,10 @@ def get_airports_by_handle(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # =====================
     # 📦 BASE QUERY
-    # =====================
     query = build_airport_query(db, user.id)
 
-    # =====================
     # 📦 BBOX
-    # =====================
     if bbox:
         parsed = parse_bbox(bbox)
         if parsed:
@@ -320,9 +313,7 @@ def get_airports_by_handle(
                 Airport.longitude.between(min_lng, max_lng),
             )
 
-    # =====================
     # 🔍 FILTER
-    # =====================
     if city:
         query = query.filter(Airport.city.ilike(f"%{city}%"))
 
@@ -333,7 +324,14 @@ def get_airports_by_handle(
 
     rows = query.limit(500).all()
 
-    return success_response([serialize_airport(r) for r in rows])
+    return success_response({
+        "user_id": str(user.id),
+        "handle": user.handle,
+        "avatar_url": user.avatar_url,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "airports": [serialize_airport(r) for r in rows]
+    })
 
 @router.get("/airports/details")
 def get_airport_visit_detail_by_user(
