@@ -193,7 +193,7 @@ def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
 
     reset_token = create_reset_token({"sub": str(user.id)})
 
-    reset_link = f"{settings.BASE_URL}{settings.RESET_PASSWORD_PATH}?token={quote(reset_token)}"
+    reset_link = f"{settings.BASE_URL}{settings.RESET_PASSWORD_URL}?token={quote(reset_token)}"
     # TODO: gửi email thật
     send_reset_email(user.email, reset_link)
 
