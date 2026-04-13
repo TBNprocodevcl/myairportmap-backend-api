@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+import random
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,11 +10,11 @@ from urllib.parse import quote
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.schemas.google import GoogleLoginRequest
-from app.schemas.user import ForgotPasswordRequest, RegisterRequest, LoginRequest, ResetPasswordRequest, TokenResponse, UserResponse
+from app.schemas.user import ForgotPasswordRequest, RegisterRequest, LoginRequest, ResetPasswordOTPRequest, ResetPasswordRequest, TokenResponse, UserResponse
 from app.core.security import create_reset_token, hash_password, verify_password, create_access_token
 from app.core.config import settings
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.services.email import send_reset_email
+from app.services.email import send_otp_email, send_reset_email
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
@@ -219,6 +221,54 @@ def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
         raise HTTPException(404, "User not found")
 
     user.password = hash_password(data.new_password)
+    db.commit()
+
+    return success_response({}, "Password updated successfully")
+
+@router.post("/forgot-password-otp")
+def forgot_password_otp(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+
+    if not user:
+        return success_response({}, "If email exists, OTP sent")
+
+    otp = str(random.randint(100000, 999999))
+
+    user.reset_otp = otp
+    user.reset_otp_expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    user.reset_otp_attempts = 0
+
+    db.commit()
+
+    send_otp_email(user.email, otp)
+
+    return success_response({}, "If email exists, OTP sent")
+
+@router.post("/reset-password-otp")
+def reset_password_otp(data: ResetPasswordOTPRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+
+    if not user:
+        raise HTTPException(400, "Invalid request")
+
+    if user.reset_otp_attempts >= 5:
+        raise HTTPException(400, "Too many attempts")
+
+    if user.reset_otp != data.otp:
+        user.reset_otp_attempts += 1
+        db.commit()
+        raise HTTPException(400, "Invalid OTP")
+
+    if user.reset_otp_expire < datetime.now(timezone.utc):
+        raise HTTPException(400, "OTP expired")
+
+    user.password = hash_password(data.new_password)
+
+    # clear OTP
+    user.reset_otp = None
+    user.reset_otp_expire = None
+    user.reset_otp_attempts = 0
+
     db.commit()
 
     return success_response({}, "Password updated successfully")

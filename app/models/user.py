@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Boolean
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -19,6 +19,9 @@ class User(Base):
     google_id = Column(String, nullable=True)
     visits = relationship("Visit", backref="user")
     is_shared = Column(Boolean, default=False)
+    reset_otp = Column(String, nullable=True)
+    reset_otp_expire = Column(DateTime(timezone=True), nullable=True)
+    reset_otp_attempts = Column(Integer, default=0)
     
     certifications = relationship(
         "Certification",
