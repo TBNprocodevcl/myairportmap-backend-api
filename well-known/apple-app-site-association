@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appID": "ABCDE12345.com.myapp",
+        "paths": [ "/reset-password/*" ]
+      }
+    ]
+  }
+}
