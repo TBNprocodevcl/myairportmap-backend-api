@@ -131,6 +131,20 @@ def me(user = Depends(get_current_user)):
         UserResponse.model_validate(user).model_dump()
     )
 
+@router.delete("/me")
+def delete_user(
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    # optional: cascade cleanup nếu cần (Visit, etc.)
+
+    db.delete(user)
+    db.commit()
+
+    return success_response(
+        {},
+        "User deleted successfully"
+    )
 
 @router.post("/google", response_model=TokenResponse)
 def login_google(payload: GoogleLoginRequest, db: Session = Depends(get_db)):

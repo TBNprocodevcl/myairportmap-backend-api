@@ -40,3 +40,6 @@ node_modules/
 # Build
 dist/
 build/
+
+secrets/
+*.p8

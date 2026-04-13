@@ -5,3 +5,4 @@ from .runway import Runway
 from .runway_landings import RunwayLanding
 from .certification import Certification
 from .user_certification import UserCertification
+from .subscription import Subscription

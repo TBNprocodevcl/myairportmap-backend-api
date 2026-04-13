@@ -13,5 +13,10 @@ class Settings:
     SENDGRID_API_KEY: str = os.getenv("SENDGRID_API_KEY")
     EMAIL_FROM: str = os.getenv("EMAIL_FROM")
     BASE_URL: str = os.getenv("BASE_URL")
+    APPLE_KEY_ID: str = os.getenv("APPLE_KEY_ID")
+    APPLE_ISSUER_ID: str = os.getenv("APPLE_ISSUER_ID")
+    APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID")
+    APPLE_SHARED_SECRET: str = os.getenv("APPLE_SHARED_SECRET")
+    PRIVATE_KEY_PATH = "secrets/AuthKey.p8"
 
 settings = Settings()

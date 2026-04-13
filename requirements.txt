@@ -45,3 +45,4 @@ pandas
 python-multipart
 Pillow
 sendgrid
+PyJWT
