@@ -1,10 +1,14 @@
 {
-  "applinks": {
-    "details": [
-      {
-        "appID": "ABCDE12345.com.myapp",
-        "paths": [ "/reset-password/*" ]
-      }
-    ]
-  }
+    "applinks": {
+        "details": [
+            {
+                "appID": "K4Q3B5AL32.com.my.airportmap",
+                "paths": [
+                    "/map",
+                    "/reset-password",
+                    "*"
+                ]
+            }
+        ]
+    }
 }
