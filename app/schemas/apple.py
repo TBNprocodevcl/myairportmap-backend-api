@@ -1,7 +1,8 @@
-from pydantic.v1 import BaseModel
+from pydantic import BaseModel
 
 
-class VerifyReceiptRequest(BaseModel):
-    platform: str
-    receipt_data: str
+class VerifySubscriptionRequest(BaseModel):
+    transaction_id: str
+    original_transaction_id: str
     product_id: str
+    platform: str  # "ios" hoặc "android"

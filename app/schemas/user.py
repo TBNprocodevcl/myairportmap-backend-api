@@ -1,3 +1,4 @@
+from datetime import datetime
 import re
 from typing import Optional
 
@@ -22,7 +23,9 @@ class UserResponse(BaseModel):
     handle: str | None
     avatar_url: str | None
     total_airports: int = 0
-    is_shared: Optional[bool] = False    
+    is_shared: Optional[bool] = False
+    is_paid: bool = False
+    premium_expire_at: Optional[datetime] = None    
     class Config:
         from_attributes = True
 
