@@ -134,11 +134,15 @@ def me(
     db_user = db.query(User).filter(User.id == user.id).first()
 
     now = datetime.now(timezone.utc)
-
-    is_paid = db.query(Subscription).filter(
-        Subscription.user_id == db_user.id,
-        Subscription.expiration_date > now
-    ).first() is not None
+    if settings.DEMO_FLAG:
+        is_paid = db.query(Subscription).filter(
+            Subscription.user_id == db_user.id
+        ).first() is not None
+    else:
+        is_paid = db.query(Subscription).filter(
+            Subscription.user_id == db_user.id,
+            Subscription.expiration_date > now
+        ).first() is not None
 
     db_user.is_paid = is_paid
 

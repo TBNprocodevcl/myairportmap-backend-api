@@ -18,5 +18,6 @@ class Settings:
     APPLE_BUNDLE_ID: str = os.getenv("APPLE_BUNDLE_ID")
     APPLE_SHARED_SECRET: str = os.getenv("APPLE_SHARED_SECRET")
     PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
+    DEMO_FLAG = os.getenv("DEMO_FLAG", "false").lower() == "true"
 
 settings = Settings()

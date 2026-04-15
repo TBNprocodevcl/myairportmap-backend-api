@@ -158,15 +158,25 @@ def verify_subscription(
     print("SUBS:", db.query(Subscription).all())
 
 
-    return {
-        "success": True,
-        "data": {
+    if settings.DEMO_FLAG:
+        data = {
+            "is_premium": db.query(Subscription).filter(
+                Subscription.user_id == db_user.id
+            ).first() is not None,
+            "expiration_date": expiration_date
+        }
+    else:
+        data = {
             "is_premium": db.query(Subscription).filter(
                 Subscription.user_id == db_user.id,
                 Subscription.expiration_date > now
             ).first() is not None,
             "expiration_date": expiration_date
         }
+
+    return {
+        "success": True,
+        "data": data
     }
 
 @router.get("/subscription/status")
