@@ -115,6 +115,14 @@ def verify_subscription(
 
     # 🔁 tránh duplicate
     original_transaction_id = latest["originalTransactionId"]
+    existing_owner = db.query(Subscription).filter(
+        Subscription.original_transaction_id == original_transaction_id,
+        Subscription.user_id.isnot(None),
+        Subscription.user_id != db_user.id
+    ).first()
+
+    if existing_owner:
+        raise HTTPException(400, "Subscription already owned by another account")
     existing = db.query(Subscription).filter(
         Subscription.original_transaction_id == original_transaction_id
     ).first()
