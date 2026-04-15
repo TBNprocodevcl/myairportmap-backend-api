@@ -8,6 +8,7 @@ from jose import jwt, JWTError
 from urllib.parse import quote
 
 from app.db.session import SessionLocal
+from app.models.subscription import Subscription
 from app.models.user import User
 from app.schemas.google import GoogleLoginRequest
 from app.schemas.user import ForgotPasswordRequest, RegisterRequest, LoginRequest, ResetPasswordOTPRequest, ResetPasswordRequest, TokenResponse, UserResponse
@@ -126,9 +127,23 @@ def get_current_user(
 
 # 👤 /me
 @router.get("/me")
-def me(user = Depends(get_current_user)):
+def me(
+    user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db_user = db.query(User).filter(User.id == user.id).first()
+
+    now = datetime.now(timezone.utc)
+
+    is_paid = db.query(Subscription).filter(
+        Subscription.user_id == db_user.id,
+        Subscription.expiration_date > now
+    ).first() is not None
+
+    db_user.is_paid = is_paid
+
     return success_response(
-        UserResponse.model_validate(user).model_dump()
+        UserResponse.model_validate(db_user).model_dump()
     )
 
 @router.delete("/me")

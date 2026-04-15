@@ -35,12 +35,12 @@ def verify_subscription(
     }
 
     res = requests.get(
-        APPLE_API + data.transaction_id,
+        APPLE_API + data.original_transaction_id,
         headers=headers
     )
     if res.status_code in [401, 404]:
         print("Switch to SANDBOX")
-        res = requests.get(APPLE_API_SANDBOX + data.transaction_id, headers=headers)
+        res = requests.get(APPLE_API_SANDBOX + data.original_transaction_id, headers=headers)
 
     if res.status_code != 200:
         print("APPLE ERROR:", res.status_code, res.text)
@@ -63,7 +63,7 @@ def verify_subscription(
 
     for t in transactions:
         payload = decode_apple_jwt(t["signedTransactionInfo"])
-
+        print("Decoded transaction:", payload)
         decoded_transactions.append({
             "transactionId": payload.get("transactionId"),
             "originalTransactionId": payload.get("originalTransactionId"),
@@ -114,16 +114,24 @@ def verify_subscription(
     is_active = expiration_date > now
 
     # 🔁 tránh duplicate
-    transaction_id = latest.get("transactionId") or latest["originalTransactionId"]
+    original_transaction_id = latest["originalTransactionId"]
     existing = db.query(Subscription).filter(
-        Subscription.transaction_id == transaction_id
+        Subscription.original_transaction_id == original_transaction_id
     ).first()
     db_user = db.query(User).filter(User.id == user.id).first()
 
     if existing:
+        print("Existing subscription found:", existing.id)
+        if existing.user_id and existing.user_id != db_user.id:
+            raise HTTPException(400, "Subscription already owned by another account")
+
+        if not existing.user_id:
+            existing.user_id = db_user.id
+
         existing.expiration_date = expiration_date
         existing.status = "active" if is_active else "expired"
     else:
+        print("Creating new subscription")
         sub = Subscription(
             id=uuid4(),
             user_id=db_user.id,
@@ -136,17 +144,27 @@ def verify_subscription(
             status="active" if is_active else "expired"
         )
         db.add(sub)
-
+        
+   
     # 🔓 unlock premium
-    db_user.is_paid = is_active
-    db_user.premium_expire_at = expiration_date
+    # db_user.is_paid = db.query(Subscription).filter(
+    #     Subscription.user_id == db_user.id,
+    #     Subscription.expiration_date > now
+    # ).first() is not None
+    # db_user.premium_expire_at = expiration_date
     db.commit()
     db.refresh(db_user)
+    print("USER ID:", user.id)
+    print("SUBS:", db.query(Subscription).all())
+
 
     return {
         "success": True,
         "data": {
-            "is_premium": is_active,
+            "is_premium": db.query(Subscription).filter(
+                Subscription.user_id == db_user.id,
+                Subscription.expiration_date > now
+            ).first() is not None,
             "expiration_date": expiration_date
         }
     }
@@ -158,16 +176,16 @@ def get_subscription_status(
 ):
     now = datetime.now(timezone.utc)
 
-    is_active = (
-        user.premium_expire_at is not None
-        and user.premium_expire_at > now
-    )
+    sub = db.query(Subscription).filter(
+        Subscription.user_id == user.id,
+        Subscription.expiration_date > now
+    ).order_by(Subscription.expiration_date.desc()).first()
 
     return {
         "success": True,
         "data": {
-            "is_premium": is_active,
-            "expiration_date": user.premium_expire_at
+            "is_premium": sub is not None,
+            "expiration_date": sub.expiration_date if sub else None
         }
     }
 
