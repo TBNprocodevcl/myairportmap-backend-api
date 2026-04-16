@@ -46,3 +46,4 @@ python-multipart
 Pillow
 sendgrid
 PyJWT
+gunicorn
