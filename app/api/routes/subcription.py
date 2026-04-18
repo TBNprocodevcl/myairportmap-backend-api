@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.routes.auth import get_current_user
+from app.core.android.verify import verify_android_subscription, service
 from app.core.apple.verify import create_apple_token
 from app.core.config import settings
 from app.db.session import get_db
@@ -22,12 +23,30 @@ def decode_apple_jwt(token: str):
         token,
         options={"verify_signature": False}  # Apple verify bằng server khác
     )
+
 @router.post("/subscription/verify")
 def verify_subscription(
     data: VerifySubscriptionRequest,
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    if data.platform == "ios":
+        return handle_ios(data, db, user)
+
+    elif data.platform == "android":
+        return handle_android(data, db, user)
+
+    else:
+        raise HTTPException(400, "Unsupported platform")
+    
+# @router.post("/subscription/verify")
+def handle_ios(
+    data,
+    db,
+    user
+):
+    if not data.original_transaction_id:
+        raise HTTPException(400, "Missing original_transaction_id")
     token = create_apple_token()
 
     headers = {
@@ -179,6 +198,91 @@ def verify_subscription(
         "data": data
     }
 
+def handle_android(data, db, user):
+    if not data.purchase_token:
+        raise HTTPException(400, "Missing purchase_token")
+    result = verify_android_subscription(
+        package_name=settings.ANDROID_PACKAGE_NAME,
+        product_id=data.product_id,
+        purchase_token=data.purchase_token
+    )
+
+
+    expiry_ms = result.get("expiryTimeMillis")
+    start_ms = result.get("startTimeMillis")
+    cancel_reason = result.get("cancelReason")
+
+    if not expiry_ms:
+        raise HTTPException(400, "Invalid subscription")
+
+    if result.get("acknowledgementState") == 0:
+        try:
+            service.purchases().subscriptions().acknowledge(
+                packageName=settings.ANDROID_PACKAGE_NAME,
+                subscriptionId=data.product_id,
+                token=data.purchase_token,
+                body={}
+            ).execute()
+        except Exception as e:
+            print("ACK ERROR:", str(e))
+
+    expiration_date = datetime.fromtimestamp(
+        int(expiry_ms) / 1000,
+        tz=timezone.utc
+    )
+
+    purchase_date = datetime.fromtimestamp(
+        int(start_ms) / 1000,
+        tz=timezone.utc
+    ) if start_ms else None
+
+    now = datetime.now(timezone.utc)
+    payment_state = result.get("paymentState")
+
+    is_active = (
+        expiration_date > now
+        and payment_state in [1, 2]  # 1: purchased, 2: trial
+    )
+    db_user = db.query(User).filter(User.id == user.id).first()
+
+    purchase_token = data.purchase_token
+
+    existing = db.query(Subscription).filter(
+        Subscription.original_transaction_id == purchase_token
+    ).first()
+
+    if existing:
+        if existing.user_id and existing.user_id != db_user.id:
+            raise HTTPException(400, "Already owned")
+
+        existing.user_id = db_user.id
+        existing.expiration_date = expiration_date
+        existing.status = "active" if is_active else "expired"
+
+    else:
+        sub = Subscription(
+            id=uuid4(),
+            user_id=db_user.id,
+            product_id=data.product_id,
+            transaction_id=result.get("orderId"),
+            original_transaction_id=purchase_token,
+            purchase_date=purchase_date,
+            expiration_date=expiration_date,
+            platform="android",
+            status="active" if is_active else "expired"
+        )
+        db.add(sub)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "is_premium": is_active,
+            "expiration_date": expiration_date
+        }
+    }
+
 @router.get("/subscription/status")
 def get_subscription_status(
     db: Session = Depends(get_db),
@@ -207,7 +311,7 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
     if not signed_payload:
         raise HTTPException(400, "Missing payload")
 
-    # ⚠️ DEV: chưa verify signature
+    # ⚠️ DEV: chưa verify signature (PROD phải verify)
     try:
         decoded = jwt.decode(
             signed_payload,
@@ -223,15 +327,18 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
     if not signed_tx:
         return {"success": True}
 
-    # decode nested JWT
-    tx = jwt.decode(signed_tx, options={"verify_signature": False})
+    # decode transaction
+    try:
+        tx = jwt.decode(signed_tx, options={"verify_signature": False})
+    except Exception:
+        raise HTTPException(400, "Invalid transaction")
 
-    transaction_id = tx.get("transactionId")
     original_transaction_id = tx.get("originalTransactionId")
-    product_id = tx.get("productId")
+    transaction_id = tx.get("transactionId")
 
     expires_ms = tx.get("expiresDate")
     purchase_ms = tx.get("purchaseDate")
+    revocation_ms = tx.get("revocationDate")
 
     expiration_date = None
     purchase_date = None
@@ -249,48 +356,65 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
         )
 
     now = datetime.now(timezone.utc)
-    is_active = expiration_date and expiration_date > now
 
-    # 🔍 tìm subscription theo original_transaction_id
+    # 🔍 tìm subscription
     sub = db.query(Subscription).filter(
         Subscription.original_transaction_id == original_transaction_id
     ).first()
 
-    user = None
-    if sub:
-        user = db.query(User).get(sub.user_id)
+    if not sub:
+        # webhook đến trước verify → bỏ qua
+        print("Webhook before verify → skip")
+        return {"success": True}
+
+    user = db.query(User).get(sub.user_id) if sub.user_id else None
 
     # =========================
     # 🎯 HANDLE EVENTS
     # =========================
 
     if notification_type in ["INITIAL_BUY", "DID_RENEW"]:
-        if sub:
-            sub.expiration_date = expiration_date
-            sub.status = "active"
-        if not sub:
-            print("Webhook before verify → skip")
-            return {"success": True}
+        sub.expiration_date = expiration_date
+        sub.status = "active"
 
         if user:
             user.is_paid = True
             user.premium_expire_at = expiration_date
 
     elif notification_type in ["EXPIRED", "DID_FAIL_TO_RENEW"]:
-        if sub:
-            sub.status = "expired"
+        sub.status = "expired"
 
         if user:
             user.is_paid = False
 
     elif notification_type in ["REFUND", "REVOKE"]:
-        if sub:
-            sub.status = "revoked"
+        sub.status = "revoked"
+        sub.expiration_date = now
 
         if user:
             user.is_paid = False
 
-    # debug log
+    elif notification_type == "GRACE_PERIOD":
+        # vẫn còn quyền sử dụng tạm thời
+        sub.status = "grace"
+
+    elif notification_type == "PRICE_INCREASE":
+        print("User needs to accept price increase")
+
+    # =========================
+    # 🔄 sync trạng thái chuẩn
+    # =========================
+
+    if expiration_date:
+        is_active = expiration_date > now and not revocation_ms
+
+        sub.status = "active" if is_active else sub.status
+
+        if user:
+            user.is_paid = is_active
+            user.premium_expire_at = expiration_date
+
+    # log
     print("APPLE WEBHOOK:", notification_type, transaction_id)
 
     db.commit()

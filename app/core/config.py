@@ -19,5 +19,7 @@ class Settings:
     APPLE_SHARED_SECRET: str = os.getenv("APPLE_SHARED_SECRET")
     PRIVATE_KEY_PATH = os.getenv("PRIVATE_KEY_PATH")
     DEMO_FLAG = os.getenv("DEMO_FLAG", "false").lower() == "true"
+    GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
+    ANDROID_PACKAGE_NAME = os.getenv("ANDROID_PACKAGE_NAME")
 
 settings = Settings()

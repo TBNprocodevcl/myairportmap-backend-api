@@ -47,3 +47,5 @@ Pillow
 sendgrid
 PyJWT
 gunicorn
+google-api-python-client 
+google-auth
