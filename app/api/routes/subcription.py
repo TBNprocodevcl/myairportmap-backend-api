@@ -75,7 +75,7 @@ def verify_subscription(
 
     valid_transactions = [
         t for t in decoded_transactions
-        if t.get("expiresDate")
+        if t.get("expiresDate") and not t.get("revocationDate")
     ]
 
     if not valid_transactions:
@@ -112,18 +112,10 @@ def verify_subscription(
 
     now = datetime.now(timezone.utc)
     is_active = expiration_date > now
+    db_user = db.query(User).filter(User.id == user.id).first()
 
     # 🔁 tránh duplicate
     original_transaction_id = latest["originalTransactionId"]
-    existing_owner = db.query(Subscription).filter(
-        Subscription.original_transaction_id == original_transaction_id,
-        Subscription.user_id.isnot(None),
-        Subscription.user_id != db_user.id
-    ).first()
-    db_user = db.query(User).filter(User.id == user.id).first()
-
-    if existing_owner:
-        raise HTTPException(400, "Subscription already owned by another account")
     existing = db.query(Subscription).filter(
         Subscription.original_transaction_id == original_transaction_id
     ).first()
