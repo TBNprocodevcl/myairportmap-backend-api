@@ -120,13 +120,13 @@ def verify_subscription(
         Subscription.user_id.isnot(None),
         Subscription.user_id != db_user.id
     ).first()
+    db_user = db.query(User).filter(User.id == user.id).first()
 
     if existing_owner:
         raise HTTPException(400, "Subscription already owned by another account")
     existing = db.query(Subscription).filter(
         Subscription.original_transaction_id == original_transaction_id
     ).first()
-    db_user = db.query(User).filter(User.id == user.id).first()
 
     if existing:
         print("Existing subscription found:", existing.id)
