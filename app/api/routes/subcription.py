@@ -306,7 +306,7 @@ def get_subscription_status(
 @router.post("/webhook")
 async def apple_webhook(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
-
+    print("Received Apple webhook:", body)
     signed_payload = body.get("signedPayload")
     if not signed_payload:
         raise HTTPException(400, "Missing payload")
