@@ -21,5 +21,6 @@ class Settings:
     DEMO_FLAG = os.getenv("DEMO_FLAG", "false").lower() == "true"
     GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
     ANDROID_PACKAGE_NAME = os.getenv("ANDROID_PACKAGE_NAME")
+    USE_GOOGLE = os.getenv("USE_GOOGLE", "false").lower() == "true"
 
 settings = Settings()
