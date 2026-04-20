@@ -4,15 +4,16 @@ from app.core.config import settings
 
 SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
 USE_GOOGLE = settings.USE_GOOGLE 
-if not USE_GOOGLE:
+if USE_GOOGLE:
     credentials = service_account.Credentials.from_service_account_file(
         settings.GOOGLE_SERVICE_ACCOUNT_FILE,
         scopes=SCOPES
     )
+    service = build("androidpublisher", "v3", credentials=credentials)
+
 else:
     credentials = None
 
-service = build("androidpublisher", "v3", credentials=credentials)
 
 def verify_android_subscription(package_name, product_id, purchase_token):
     if not credentials:
