@@ -13,6 +13,8 @@ if USE_GOOGLE:
 
 else:
     credentials = None
+    service = None
+
 
 
 def verify_android_subscription(package_name, product_id, purchase_token):
