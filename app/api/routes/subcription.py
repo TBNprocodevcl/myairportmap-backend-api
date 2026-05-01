@@ -1,5 +1,7 @@
 import jwt
 import requests
+import base64
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,11 +20,52 @@ router = APIRouter(tags=["apple"])
 
 APPLE_API = "https://api.storekit.itunes.apple.com/inApps/v1/subscriptions/"
 APPLE_API_SANDBOX = "https://api.storekit-sandbox.itunes.apple.com/inApps/v1/subscriptions/"
+
+
 def decode_apple_jwt(token: str):
     return jwt.decode(
         token,
         options={"verify_signature": False}  # Apple verify bằng server khác
     )
+
+
+def _decode_android_pubsub_payload(body: dict):
+    message = body.get("message")
+    if not message:
+        raise HTTPException(400, "Missing message")
+
+    encoded_data = message.get("data")
+    if not encoded_data:
+        raise HTTPException(400, "Missing message.data")
+
+    try:
+        decoded_bytes = base64.b64decode(encoded_data)
+        payload = json.loads(decoded_bytes.decode("utf-8"))
+    except Exception:
+        raise HTTPException(400, "Invalid Pub/Sub payload")
+
+    return payload
+
+
+def _is_android_subscription_active(result: dict, now: datetime):
+    expiry_ms = result.get("expiryTimeMillis")
+    if not expiry_ms:
+        return False, None
+
+    expiration_date = datetime.fromtimestamp(
+        int(expiry_ms) / 1000,
+        tz=timezone.utc
+    )
+
+    payment_state = result.get("paymentState")
+    cancel_reason = result.get("cancelReason")
+
+    is_active = (
+        expiration_date > now
+        and payment_state in [1, 2]
+        and cancel_reason is None
+    )
+    return is_active, expiration_date
 
 @router.post("/subscription/verify")
 def verify_subscription(
@@ -416,6 +459,76 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
 
     # log
     print("APPLE WEBHOOK:", notification_type, transaction_id)
+
+    db.commit()
+
+    return {"success": True}
+
+
+@router.post("/webhook/android")
+async def android_webhook(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    payload = _decode_android_pubsub_payload(body)
+
+    package_name = payload.get("packageName")
+    if package_name != settings.ANDROID_PACKAGE_NAME:
+        raise HTTPException(400, "Invalid package")
+
+    subscription_notification = payload.get("subscriptionNotification")
+    if not subscription_notification:
+        # testNotification / oneTimeProductNotification
+        return {"success": True}
+
+    purchase_token = subscription_notification.get("purchaseToken")
+    product_id = subscription_notification.get("subscriptionId")
+    notification_type = subscription_notification.get("notificationType")
+
+    if not purchase_token or not product_id:
+        raise HTTPException(400, "Missing purchase token or product id")
+
+    sub = db.query(Subscription).filter(
+        Subscription.original_transaction_id == purchase_token
+    ).first()
+
+    if not sub:
+        print("ANDROID WEBHOOK: subscription not found, skip", purchase_token)
+        return {"success": True}
+
+    result = verify_android_subscription(
+        package_name=settings.ANDROID_PACKAGE_NAME,
+        product_id=product_id,
+        purchase_token=purchase_token
+    )
+
+    now = datetime.now(timezone.utc)
+    is_active, expiration_date = _is_android_subscription_active(result, now)
+
+    start_ms = result.get("startTimeMillis")
+    if start_ms:
+        sub.purchase_date = datetime.fromtimestamp(
+            int(start_ms) / 1000,
+            tz=timezone.utc
+        )
+
+    if expiration_date:
+        sub.expiration_date = expiration_date
+
+    sub.product_id = product_id
+    sub.transaction_id = result.get("orderId") or sub.transaction_id
+    sub.status = "active" if is_active else "expired"
+
+    user = db.query(User).get(sub.user_id) if sub.user_id else None
+    if user:
+        user.is_paid = is_active
+        user.premium_expire_at = expiration_date
+
+    # Keep event log for debugging RTDN flow and event mapping.
+    print("ANDROID WEBHOOK:", {
+        "notification_type": notification_type,
+        "purchase_token": purchase_token,
+        "product_id": product_id,
+        "is_active": is_active
+    })
 
     db.commit()
 

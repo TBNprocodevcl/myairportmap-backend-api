@@ -57,6 +57,25 @@ def avatar_url_for_handle(handle: str):
     return f"https://api.dicebear.com/7.x/initials/svg?seed={handle}"
 
 
+def hydrate_user_premium_from_subscription(db: Session, db_user: User):
+    latest_sub = db.query(Subscription).filter(
+        Subscription.user_id == db_user.id
+    ).order_by(Subscription.expiration_date.desc()).first()
+
+    now = datetime.now(timezone.utc)
+    if settings.DEMO_FLAG:
+        db_user.is_paid = latest_sub is not None
+    else:
+        db_user.is_paid = (
+            latest_sub is not None
+            and latest_sub.expiration_date is not None
+            and latest_sub.expiration_date > now
+        )
+
+    db_user.premium_expire_at = latest_sub.expiration_date if latest_sub else None
+    return db_user
+
+
 # 🔥 REGISTER
 @router.post("/register")
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
@@ -93,6 +112,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.password):
         raise HTTPException(401, "Invalid credentials")
 
+    user = hydrate_user_premium_from_subscription(db, user)
     token = create_access_token({"sub": str(user.id)})
 
     return success_response(
@@ -132,19 +152,7 @@ def me(
     db: Session = Depends(get_db)
 ):
     db_user = db.query(User).filter(User.id == user.id).first()
-
-    now = datetime.now(timezone.utc)
-    if settings.DEMO_FLAG:
-        is_paid = db.query(Subscription).filter(
-            Subscription.user_id == db_user.id
-        ).first() is not None
-    else:
-        is_paid = db.query(Subscription).filter(
-            Subscription.user_id == db_user.id,
-            Subscription.expiration_date > now
-        ).first() is not None
-
-    db_user.is_paid = is_paid
+    db_user = hydrate_user_premium_from_subscription(db, db_user)
 
     return success_response(
         UserResponse.model_validate(db_user).model_dump()

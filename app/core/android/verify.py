@@ -21,6 +21,7 @@ def verify_android_subscription(package_name, product_id, purchase_token):
     if not credentials:
         return {
             "purchaseState": 0,
+            "paymentState": 1,
             "expiryTimeMillis": 9999999999999
         }
     result = service.purchases().subscriptions().get(
