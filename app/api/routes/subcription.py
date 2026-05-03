@@ -244,11 +244,15 @@ def handle_ios(
 def handle_android(data, db, user):
     if not data.purchase_token:
         raise HTTPException(400, "Missing purchase_token")
-    result = verify_android_subscription(
-        package_name=settings.ANDROID_PACKAGE_NAME,
-        product_id=data.product_id,
-        purchase_token=data.purchase_token
-    )
+    try:
+        result = verify_android_subscription(
+            package_name=settings.ANDROID_PACKAGE_NAME,
+            product_id=data.product_id,
+            purchase_token=data.purchase_token
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    print("Android subscription verification result:", result)
 
 
     expiry_ms = result.get("expiryTimeMillis")
@@ -465,6 +469,36 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
     return {"success": True}
 
 
+@router.get("/subscription/list")
+def list_subscriptions(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    """Lấy tất cả subscription của user hiện tại."""
+    subs = db.query(Subscription).filter(
+        Subscription.user_id == user.id
+    ).order_by(Subscription.expiration_date.desc()).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(s.id),
+                "product_id": s.product_id,
+                "transaction_id": s.transaction_id,
+                "original_transaction_id": s.original_transaction_id,
+                "platform": s.platform,
+                "status": s.status,
+                "purchase_date": s.purchase_date,
+                "expiration_date": s.expiration_date,
+                "created_at": s.created_at,
+            }
+            for s in subs
+        ]
+    }
+
+
+
 @router.post("/webhook/android")
 async def android_webhook(request: Request, db: Session = Depends(get_db)):
     body = await request.json()
@@ -499,6 +533,8 @@ async def android_webhook(request: Request, db: Session = Depends(get_db)):
         product_id=product_id,
         purchase_token=purchase_token
     )
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(400, result["error"])
 
     now = datetime.now(timezone.utc)
     is_active, expiration_date = _is_android_subscription_active(result, now)
