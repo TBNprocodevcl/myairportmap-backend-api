@@ -3,6 +3,7 @@ import random
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 from urllib.parse import quote
@@ -313,3 +314,36 @@ def reset_password_otp(data: ResetPasswordOTPRequest, db: Session = Depends(get_
     db.commit()
 
     return success_response({}, "Password updated successfully")
+
+
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/set-password")
+def set_password(
+    data: SetPasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Dùng cho lần đầu login (is_first_login=True): đặt mật khẩu mới và xoá flag."""
+    if not user.is_first_login:
+        raise HTTPException(400, "Not a first login user")
+
+    db_user = db.query(User).filter(User.id == user.id).first()
+    db_user.password = hash_password(data.new_password)
+    db_user.is_first_login = False
+    db.commit()
+    db.refresh(db_user)
+
+    db_user = hydrate_user_premium_from_subscription(db, db_user)
+    token = create_access_token({"sub": str(db_user.id)})
+
+    return success_response(
+        {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": UserResponse.model_validate(db_user).model_dump()
+        },
+        "Password set successfully"
+    )

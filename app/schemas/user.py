@@ -25,7 +25,8 @@ class UserResponse(BaseModel):
     total_airports: int = 0
     is_shared: Optional[bool] = False
     is_paid: bool = False
-    premium_expire_at: Optional[datetime] = None    
+    premium_expire_at: Optional[datetime] = None
+    is_first_login: bool = False
     class Config:
         from_attributes = True
 

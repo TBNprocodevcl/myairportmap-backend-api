@@ -24,6 +24,7 @@ class User(Base):
     reset_otp_attempts = Column(Integer, default=0)
     is_verified = Column(Boolean, default=False)
     premium_expire_at = Column(DateTime(timezone=True), nullable=True)
+    is_first_login = Column(Boolean, default=False)
 
     certifications = relationship(
         "Certification",
