@@ -110,7 +110,21 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 def login(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
 
-    if not user or not verify_password(data.password, user.password):
+    if not user:
+        raise HTTPException(401, "Invalid credentials")
+
+    if user.is_first_login:
+        return success_response(
+            {
+                "requires_password_setup": True,
+                "email": user.email,
+                "is_first_login": True,
+                "next_step": "/auth/forgot-password-otp"
+            },
+            "First login detected. Please reset your password."
+        )
+
+    if not verify_password(data.password, user.password):
         raise HTTPException(401, "Invalid credentials")
 
     user = hydrate_user_premium_from_subscription(db, user)
