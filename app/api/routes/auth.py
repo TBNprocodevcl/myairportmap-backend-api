@@ -319,6 +319,7 @@ def reset_password_otp(data: ResetPasswordOTPRequest, db: Session = Depends(get_
         raise HTTPException(400, "OTP expired")
 
     user.password = hash_password(data.new_password)
+    user.is_first_login = False
 
     # clear OTP
     user.reset_otp = None
