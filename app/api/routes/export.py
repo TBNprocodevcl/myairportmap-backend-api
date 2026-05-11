@@ -15,7 +15,7 @@ from app.db.session import SessionLocal
 from app.models.visit import Visit
 
 router = APIRouter(prefix="/export", tags=["export"])
-flask_bp = Blueprint("export_flask", __name__, url_prefix="/api/export")
+flask_bp = Blueprint("export_flask", __name__, url_prefix="/export/export")
 
 
 def _flask_token() -> str:

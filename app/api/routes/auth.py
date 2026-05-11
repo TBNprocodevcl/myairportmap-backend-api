@@ -3,6 +3,7 @@ import random
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from jose import jwt, JWTError
 from urllib.parse import quote
@@ -28,7 +29,7 @@ from helper.response import success_response
 security = HTTPBearer()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-flask_bp = Blueprint("auth_flask", __name__, url_prefix="/auth")
+flask_bp = Blueprint("auth_flask", __name__, url_prefix="/auth/auth")
 
 
 
@@ -58,6 +59,25 @@ def normalize_handle(email: str):
 
 def avatar_url_for_handle(handle: str):
     return f"https://api.dicebear.com/7.x/initials/svg?seed={handle}"
+
+
+def hydrate_user_premium_from_subscription(db: Session, db_user: User):
+    latest_sub = db.query(Subscription).filter(
+        Subscription.user_id == db_user.id
+    ).order_by(Subscription.expiration_date.desc()).first()
+
+    now = datetime.now(timezone.utc)
+    if settings.DEMO_FLAG:
+        db_user.is_paid = latest_sub is not None
+    else:
+        db_user.is_paid = (
+            latest_sub is not None
+            and latest_sub.expiration_date is not None
+            and latest_sub.expiration_date > now
+        )
+
+    db_user.premium_expire_at = latest_sub.expiration_date if latest_sub else None
+    return db_user
 
 
 def _get_current_user_from_token(token: str, db: Session):
@@ -125,9 +145,24 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 def login(data: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
 
-    if not user or not verify_password(data.password, user.password):
+    if not user:
         raise HTTPException(401, "Invalid credentials")
 
+    if user.is_first_login:
+        return success_response(
+            {
+                "requires_password_setup": True,
+                "email": user.email,
+                "is_first_login": True,
+                "next_step": "/auth/forgot-password-otp"
+            },
+            "Welcome! It looks like this is your first time signing in this app. Please tap \"Forgot Password\" to set up your password and get started."
+        )
+
+    if not verify_password(data.password, user.password):
+        raise HTTPException(401, "Invalid credentials")
+
+    user = hydrate_user_premium_from_subscription(db, user)
     token = create_access_token({"sub": str(user.id)})
 
     return success_response(
@@ -155,19 +190,7 @@ def me(
     db: Session = Depends(get_db)
 ):
     db_user = db.query(User).filter(User.id == user.id).first()
-
-    now = datetime.now(timezone.utc)
-    if settings.DEMO_FLAG:
-        is_paid = db.query(Subscription).filter(
-            Subscription.user_id == db_user.id
-        ).first() is not None
-    else:
-        is_paid = db.query(Subscription).filter(
-            Subscription.user_id == db_user.id,
-            Subscription.expiration_date > now
-        ).first() is not None
-
-    db_user.is_paid = is_paid
+    db_user = hydrate_user_premium_from_subscription(db, db_user)
 
     return success_response(
         UserResponse.model_validate(db_user).model_dump()
@@ -319,6 +342,7 @@ def reset_password_otp(data: ResetPasswordOTPRequest, db: Session = Depends(get_
         raise HTTPException(400, "OTP expired")
 
     user.password = hash_password(data.new_password)
+    user.is_first_login = False
 
     # clear OTP
     user.reset_otp = None
@@ -328,6 +352,39 @@ def reset_password_otp(data: ResetPasswordOTPRequest, db: Session = Depends(get_
     db.commit()
 
     return success_response({}, "Password updated successfully")
+
+
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/set-password")
+def set_password(
+    data: SetPasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Dùng cho lần đầu login (is_first_login=True): đặt mật khẩu mới và xoá flag."""
+    if not user.is_first_login:
+        raise HTTPException(400, "Not a first login user")
+
+    db_user = db.query(User).filter(User.id == user.id).first()
+    db_user.password = hash_password(data.new_password)
+    db_user.is_first_login = False
+    db.commit()
+    db.refresh(db_user)
+
+    db_user = hydrate_user_premium_from_subscription(db, db_user)
+    token = create_access_token({"sub": str(db_user.id)})
+
+    return success_response(
+        {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": UserResponse.model_validate(db_user).model_dump()
+        },
+        "Password set successfully"
+    )
 
 
 @flask_bp.post("/register")
@@ -444,6 +501,22 @@ def flask_reset_password_otp():
     try:
         data = _flask_payload(ResetPasswordOTPRequest)
         return jsonify(reset_password_otp(data, db=db))
+    except ValidationError as exc:
+        return jsonify({"detail": exc.errors()}), 422
+    except HTTPException as exc:
+        return _flask_error(exc)
+    finally:
+        db.close()
+
+
+@flask_bp.post("/set-password")
+def flask_set_password():
+    db = SessionLocal()
+    try:
+        user = _get_current_user_from_token(_flask_token(), db)
+        raw = request.get_json(silent=True) or {}
+        data = SetPasswordRequest.model_validate(raw)
+        return jsonify(set_password(data=data, user=user, db=db))
     except ValidationError as exc:
         return jsonify({"detail": exc.errors()}), 422
     except HTTPException as exc:

@@ -25,7 +25,7 @@ import re
 
 
 router = APIRouter(prefix="/runway360", tags=["runway360"])
-flask_bp = Blueprint("runway360_flask", __name__, url_prefix="/api/runway360")
+flask_bp = Blueprint("runway360_flask", __name__, url_prefix="/runway360/runway360")
 RUNWAY360_CARD_TEMPLATE_PATH="static/runway360_card_template.png"
 
 

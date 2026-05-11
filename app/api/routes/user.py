@@ -15,7 +15,7 @@ from app.schemas.user import UpdateProfileRequest, UpdateSharedRequest, UserResp
 from helper.response import success_response
 
 router = APIRouter(prefix="/users", tags=["users"])
-flask_bp = Blueprint("users_flask", __name__, url_prefix="/api/users")
+flask_bp = Blueprint("users_flask", __name__, url_prefix="/users/users")
 
 
 def _flask_token() -> str:

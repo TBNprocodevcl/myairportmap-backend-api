@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.my.airportmap",
+      "sha256_cert_fingerprints": [
+        "5D:D2:04:4C:49:A9:D5:40:3F:BE:68:4E:DD:79:92:7C:E7:91:17:01:66:7C:BB:30:E2:F9:91:B2:86:4D:AF:59",
+        "1A:EA:AB:45:7F:E7:43:BA:C5:0A:5A:EB:B4:0B:B3:39:7D:D2:0A:FB:21:6E:66:E2:64:3E:7F:79:DC:41:B2:70"
+      ]
+    }
+  }
+]

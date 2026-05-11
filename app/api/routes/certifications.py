@@ -16,7 +16,7 @@ from app.api.routes.auth import _get_current_user_from_token
 from helper.response import success_response
 
 router = APIRouter(prefix="/certifications", tags=["certifications"])
-flask_bp = Blueprint("certifications_flask", __name__, url_prefix="/api/certifications")
+flask_bp = Blueprint("certifications_flask", __name__, url_prefix="/certifications/certifications")
 
 
 def _flask_token() -> str:

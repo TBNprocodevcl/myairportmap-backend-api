@@ -2,7 +2,7 @@ from datetime import datetime
 import re
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from uuid import UUID
 
 class RegisterRequest(BaseModel):
@@ -25,7 +25,15 @@ class UserResponse(BaseModel):
     total_airports: int = 0
     is_shared: Optional[bool] = False
     is_paid: bool = False
-    premium_expire_at: Optional[datetime] = None    
+    premium_expire_at: Optional[datetime] = None
+    is_first_login: bool = False
+
+    @field_validator("is_first_login", mode="before")
+    @classmethod
+    def normalize_is_first_login(cls, value):
+        # Older rows may contain NULL from the initial nullable migration.
+        return False if value is None else value
+
     class Config:
         from_attributes = True
 

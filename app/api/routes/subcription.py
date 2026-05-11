@@ -1,5 +1,7 @@
 import jwt
 import requests
+import base64
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,15 +20,57 @@ from app.models.user import User
 from app.schemas.apple import VerifySubscriptionRequest
 
 router = APIRouter(tags=["apple"])
-flask_bp = Blueprint("subscription_flask", __name__, url_prefix="/api/subscription")
+flask_bp = Blueprint("subscription_flask", __name__, url_prefix="/subscription/subscription")
 
 APPLE_API = "https://api.storekit.itunes.apple.com/inApps/v1/subscriptions/"
 APPLE_API_SANDBOX = "https://api.storekit-sandbox.itunes.apple.com/inApps/v1/subscriptions/"
+
+
 def decode_apple_jwt(token: str):
     return jwt.decode(
         token,
         options={"verify_signature": False}  # Apple verify bằng server khác
     )
+
+
+def _decode_android_pubsub_payload(body: dict):
+    message = body.get("message")
+    if not message:
+        raise HTTPException(400, "Missing message")
+
+    encoded_data = message.get("data")
+    if not encoded_data:
+        raise HTTPException(400, "Missing message.data")
+
+    try:
+        decoded_bytes = base64.b64decode(encoded_data)
+        payload = json.loads(decoded_bytes.decode("utf-8"))
+    except Exception:
+        raise HTTPException(400, "Invalid Pub/Sub payload")
+
+    return payload
+
+
+def _is_android_subscription_active(result: dict, now: datetime):
+    expiry_ms = result.get("expiryTimeMillis")
+    if not expiry_ms:
+        return False, None
+
+    expiration_date = datetime.fromtimestamp(
+        int(expiry_ms) / 1000,
+        tz=timezone.utc
+    )
+
+    payment_state = result.get("paymentState")
+    cancel_reason = result.get("cancelReason")
+
+    is_active = (
+        expiration_date > now
+        and payment_state in [1, 2]
+        and cancel_reason is None
+    )
+    return is_active, expiration_date
+
 
 @router.post("/subscription/verify")
 def verify_subscription(
@@ -216,11 +260,15 @@ def handle_ios(
 def handle_android(data, db, user):
     if not data.purchase_token:
         raise HTTPException(400, "Missing purchase_token")
-    result = verify_android_subscription(
-        package_name=settings.ANDROID_PACKAGE_NAME,
-        product_id=data.product_id,
-        purchase_token=data.purchase_token
-    )
+    try:
+        result = verify_android_subscription(
+            package_name=settings.ANDROID_PACKAGE_NAME,
+            product_id=data.product_id,
+            purchase_token=data.purchase_token
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    print("Android subscription verification result:", result)
 
 
     expiry_ms = result.get("expiryTimeMillis")
@@ -318,9 +366,8 @@ def get_subscription_status(
         }
     }
 
-@router.post("/webhook")
-async def apple_webhook(request: Request, db: Session = Depends(get_db)):
-    body = await request.json()
+
+def _process_apple_webhook_payload(body: dict, db: Session):
     print("Received Apple webhook:", body)
     signed_payload = body.get("signedPayload")
     if not signed_payload:
@@ -436,6 +483,112 @@ async def apple_webhook(request: Request, db: Session = Depends(get_db)):
 
     return {"success": True}
 
+@router.post("/subscription/webhook")
+async def apple_webhook(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    return _process_apple_webhook_payload(body, db)
+
+
+@router.get("/subscription/list")
+def list_subscriptions(
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    """Lấy tất cả subscription của user hiện tại."""
+    subs = db.query(Subscription).filter(
+        Subscription.user_id == user.id
+    ).order_by(Subscription.expiration_date.desc()).all()
+
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": str(s.id),
+                "product_id": s.product_id,
+                "transaction_id": s.transaction_id,
+                "original_transaction_id": s.original_transaction_id,
+                "platform": s.platform,
+                "status": s.status,
+                "purchase_date": s.purchase_date,
+                "expiration_date": s.expiration_date,
+                "created_at": s.created_at,
+            }
+            for s in subs
+        ]
+    }
+
+
+@router.post("/subscription/webhook/android")
+async def android_webhook(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    payload = _decode_android_pubsub_payload(body)
+
+    package_name = payload.get("packageName")
+    if package_name != settings.ANDROID_PACKAGE_NAME:
+        raise HTTPException(400, "Invalid package")
+
+    subscription_notification = payload.get("subscriptionNotification")
+    if not subscription_notification:
+        # testNotification / oneTimeProductNotification
+        return {"success": True}
+
+    purchase_token = subscription_notification.get("purchaseToken")
+    product_id = subscription_notification.get("subscriptionId")
+    notification_type = subscription_notification.get("notificationType")
+
+    if not purchase_token or not product_id:
+        raise HTTPException(400, "Missing purchase token or product id")
+
+    sub = db.query(Subscription).filter(
+        Subscription.original_transaction_id == purchase_token
+    ).first()
+
+    if not sub:
+        print("ANDROID WEBHOOK: subscription not found, skip", purchase_token)
+        return {"success": True}
+
+    result = verify_android_subscription(
+        package_name=settings.ANDROID_PACKAGE_NAME,
+        product_id=product_id,
+        purchase_token=purchase_token
+    )
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(400, result["error"])
+
+    now = datetime.now(timezone.utc)
+    is_active, expiration_date = _is_android_subscription_active(result, now)
+
+    start_ms = result.get("startTimeMillis")
+    if start_ms:
+        sub.purchase_date = datetime.fromtimestamp(
+            int(start_ms) / 1000,
+            tz=timezone.utc
+        )
+
+    if expiration_date:
+        sub.expiration_date = expiration_date
+
+    sub.product_id = product_id
+    sub.transaction_id = result.get("orderId") or sub.transaction_id
+    sub.status = "active" if is_active else "expired"
+
+    user = db.query(User).get(sub.user_id) if sub.user_id else None
+    if user:
+        user.is_paid = is_active
+        user.premium_expire_at = expiration_date
+
+    # Keep event log for debugging RTDN flow and event mapping.
+    print("ANDROID WEBHOOK:", {
+        "notification_type": notification_type,
+        "purchase_token": purchase_token,
+        "product_id": product_id,
+        "is_active": is_active
+    })
+
+    db.commit()
+
+    return {"success": True}
+
 
 @flask_bp.post("/verify")
 def flask_verify_subscription():
@@ -468,5 +621,92 @@ def flask_subscription_status():
         except Exception:
             return jsonify({"detail": "Invalid token"}), 401
         return jsonify(get_subscription_status(db=db, user=user))
+    finally:
+        db.close()
+
+
+@flask_bp.post("/webhook")
+def flask_apple_webhook():
+    db = SessionLocal()
+    try:
+        body = request.get_json(silent=True) or {}
+        return jsonify(_process_apple_webhook_payload(body, db))
+    except HTTPException as exc:
+        return _flask_error(exc)
+    finally:
+        db.close()
+
+
+@flask_bp.post("/webhook/android")
+def flask_android_webhook():
+    db = SessionLocal()
+    try:
+        body = request.get_json(silent=True) or {}
+        payload = _decode_android_pubsub_payload(body)
+
+        package_name = payload.get("packageName")
+        if package_name != settings.ANDROID_PACKAGE_NAME:
+            return _flask_error(HTTPException(400, "Invalid package"))
+
+        subscription_notification = payload.get("subscriptionNotification")
+        if not subscription_notification:
+            return jsonify({"success": True})
+
+        purchase_token = subscription_notification.get("purchaseToken")
+        product_id = subscription_notification.get("subscriptionId")
+        notification_type = subscription_notification.get("notificationType")
+
+        if not purchase_token or not product_id:
+            return _flask_error(HTTPException(400, "Missing purchase token or product id"))
+
+        sub = db.query(Subscription).filter(
+            Subscription.original_transaction_id == purchase_token
+        ).first()
+
+        if not sub:
+            print("ANDROID WEBHOOK: subscription not found, skip", purchase_token)
+            return jsonify({"success": True})
+
+        result = verify_android_subscription(
+            package_name=settings.ANDROID_PACKAGE_NAME,
+            product_id=product_id,
+            purchase_token=purchase_token
+        )
+        if isinstance(result, dict) and result.get("error"):
+            return _flask_error(HTTPException(400, result["error"]))
+
+        now = datetime.now(timezone.utc)
+        is_active, expiration_date = _is_android_subscription_active(result, now)
+
+        start_ms = result.get("startTimeMillis")
+        if start_ms:
+            sub.purchase_date = datetime.fromtimestamp(
+                int(start_ms) / 1000,
+                tz=timezone.utc
+            )
+
+        if expiration_date:
+            sub.expiration_date = expiration_date
+
+        sub.product_id = product_id
+        sub.transaction_id = result.get("orderId") or sub.transaction_id
+        sub.status = "active" if is_active else "expired"
+
+        user = db.query(User).get(sub.user_id) if sub.user_id else None
+        if user:
+            user.is_paid = is_active
+            user.premium_expire_at = expiration_date
+
+        print("ANDROID WEBHOOK:", {
+            "notification_type": notification_type,
+            "purchase_token": purchase_token,
+            "product_id": product_id,
+            "is_active": is_active
+        })
+
+        db.commit()
+        return jsonify({"success": True})
+    except HTTPException as exc:
+        return _flask_error(exc)
     finally:
         db.close()

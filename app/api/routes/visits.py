@@ -37,7 +37,7 @@ def normalize_airport_id(code: str | None):
     return code
 
 router = APIRouter(prefix="/visits", tags=["visits"])
-flask_bp = Blueprint("visits_flask", __name__, url_prefix="/api/visits")
+flask_bp = Blueprint("visits_flask", __name__, url_prefix="/visits/visits")
 
 
 def _flask_token() -> str:

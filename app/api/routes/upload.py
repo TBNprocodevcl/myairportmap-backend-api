@@ -13,7 +13,7 @@ from app.db.session import get_db
 from app.db.session import SessionLocal
 
 router = APIRouter(prefix="/upload", tags=["upload"])
-flask_bp = Blueprint("upload_flask", __name__, url_prefix="/api/upload")
+flask_bp = Blueprint("upload_flask", __name__, url_prefix="/upload/upload")
 
 
 @router.post("/profile/avatar")

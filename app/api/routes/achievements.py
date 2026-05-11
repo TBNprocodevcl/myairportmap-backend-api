@@ -14,7 +14,7 @@ from app.models.airport import Airport
 from app.api.routes.auth import _get_current_user_from_token, get_current_user
 
 router = APIRouter(prefix="/achievements", tags=["achievements"])
-flask_bp = Blueprint("achievements_flask", __name__, url_prefix="/api/achievements")
+flask_bp = Blueprint("achievements_flask", __name__, url_prefix="/achievements/achievements")
 
 
 def success_response(data, message="Success"):

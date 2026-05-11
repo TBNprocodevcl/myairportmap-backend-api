@@ -16947,16 +16947,19 @@ def _build_openapi_schema() -> dict:
     )
 
     # Flask API serves several routers under /api/* to avoid clashing with
-    # existing page routes.
+    # existing page routes. Achievements is explicitly served under
+    # /achievements/achievements.
     path_remap_prefixes = {
-        "/achievements": "/api/achievements",
-        "/certifications": "/api/certifications",
-        "/export": "/api/export",
-        "/runway360": "/api/runway360",
-        "/subscription": "/api/subscription",
-        "/upload": "/api/upload",
-        "/users": "/api/users",
-        "/visits": "/api/visits",
+        "/achievements": "/achievements/achievements",
+        "/certifications": "/certifications/certifications",
+        "/export": "/export/export",
+        "/runway360": "/runway360/runway360",
+        "/subscription": "/subscription/subscription",
+        "/upload": "/upload/upload",
+        "/users": "/users/users",
+        "/visits": "/visits/visits",
+        "/auth": "/auth/auth",
+        "/airports": "/airports/airports",
     }
 
     remapped_paths = {}
@@ -16970,6 +16973,7 @@ def _build_openapi_schema() -> dict:
                 new_path = path.replace(src_prefix, dst_prefix, 1)
                 break
         remapped_paths[new_path] = value
+        print(f"[DEBUG] remapped OpenAPI path: {path} -> {new_path}")
     schema["paths"] = remapped_paths
 
     _SWAGGER_SCHEMA = schema

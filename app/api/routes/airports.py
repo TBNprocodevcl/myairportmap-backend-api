@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from flask import Blueprint, has_request_context, jsonify, request
+from flask import Blueprint, has_request_context, jsonify, request, redirect
 from app.db.session import get_db
 from app.db.session import SessionLocal
 from app.models.airport import Airport
 
 router = APIRouter(prefix="/airports", tags=["airports"])
-flask_bp = Blueprint("airports_flask", __name__, url_prefix="/airports")
+flask_bp = Blueprint("airports_flask", __name__, url_prefix="/airports/airports")
 
 
 # ✅ reusable response
@@ -151,3 +151,10 @@ def flask_get_airports():
         )
     finally:
         db.close()
+
+
+# ✅ Compatibility alias: /airports/airports -> /airports/
+@flask_bp.get("/airports")
+def flask_get_airports_compat():
+    """Redirect to canonical endpoint for backwards compatibility."""
+    return redirect("/airports/", code=307)
