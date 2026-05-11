@@ -13028,11 +13028,12 @@ def sign_in_route():
             if isinstance(result, dict) and result.get("success"):
                 token = (result.get("data") or {}).get("access_token") or ""
                 resp = redirect(nxt, code=302)
+                _cookie_secure = not app.debug and os.environ.get("COOKIE_SECURE", "1") != "0"
                 resp.set_cookie(
                     APP_SESSION_COOKIE,
                     token,
                     httponly=True,
-                    secure=True,
+                    secure=_cookie_secure,
                     samesite="Lax",
                     path="/",
                     max_age=60 * 60 * 24 * 7,
