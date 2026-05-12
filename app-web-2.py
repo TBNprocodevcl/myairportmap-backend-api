@@ -62,6 +62,7 @@ from app.api.routes import (
     certifications as certifications_api,
     subcription as subcription_api,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from app.schemas.user import LoginRequest, RegisterRequest
 from app.core.security import decode_access_token
 from fastapi import FastAPI, HTTPException
@@ -319,6 +320,9 @@ _FLOAT_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
 from flask import Flask
 app = Flask(__name__)
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
 app.register_blueprint(auth_flask_bp)
 app.register_blueprint(airports_flask_bp)
 app.register_blueprint(achievements_flask_bp)
